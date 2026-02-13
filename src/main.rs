@@ -1,106 +1,82 @@
-use std::{
-    env::args,
-    fs::File,
-    io::BufReader,
-    path::PathBuf,
-    process::exit,
-    time::{Duration, Instant},
-};
+use std::{fs::File, io::BufReader, time::Duration};
 
-use anyhow::Context;
 use iced::{
     Element, Subscription, application, time,
-    widget::{Slider, button, column, row, slider, text},
-    window::frames,
+    widget::{button, column, slider, text},
 };
 use rfd::FileDialog;
-use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source, play};
+use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
 
 fn main() -> iced::Result {
-    // let stream_handle = OutputStreamBuilder::open_default_stream()?;
-    // let mixer = stream_handle.mixer();
-
-    // let file = File::open(args().skip(1).next().unwrap_or_else(|| {
-    //     eprintln!("usage: kanta <audio file path>");
-    //     exit(1);
-    // }))
-    // .context("failed to open audio file")?;
-
-    // let sink = play(mixer, BufReader::new(file))?;
-    // sink.sleep_until_end();
-
-    application(Kanta::default, Kanta::update, Kanta::view)
+    application(Kanta::new, Kanta::update, Kanta::view)
         .subscription(Kanta::subscription)
+        .title("Kanta")
+        .window_size((640, 360))
         .run()
 }
 
 struct Kanta {
-    selected_audio_path: Option<PathBuf>,
-
+    #[allow(dead_code)] // stream needs to live as long as the application
     stream: OutputStream,
     sink: Sink,
     source: Option<Box<dyn Source>>,
-
-    ui_volume: u8,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 enum KantaMessage {
     SelectAudioPath,
     Play,
     Pause,
     PositionChanged(f32),
-    VolumeChanged(u8),
-    Tick(Instant),
+    VolumeChanged(f32),
+    UpdatePositionSlider,
 }
 
-impl Default for Kanta {
-    fn default() -> Kanta {
+impl Kanta {
+    fn new() -> Kanta {
         let stream = OutputStreamBuilder::open_default_stream().unwrap();
         let sink = Sink::connect_new(stream.mixer());
 
         Kanta {
-            selected_audio_path: None,
             stream,
             sink,
             source: None,
-            ui_volume: 100,
         }
     }
-}
 
-impl Kanta {
     fn view(&self) -> Element<'_, KantaMessage> {
-        let playback_slider: Slider<'_, f32, KantaMessage> = match &self.source {
+        let select_audio_path_button =
+            button("Select audio file").on_press(KantaMessage::SelectAudioPath);
+
+        let play_pause_button = if self.sink.is_paused() {
+            button("Play").on_press(KantaMessage::Play)
+        } else {
+            button("Pause").on_press(KantaMessage::Pause)
+        };
+
+        let position_slider = match &self.source {
             Some(src) => {
                 let elapsed = self.sink.get_pos().as_secs_f32();
                 let total = src.total_duration().unwrap().as_secs_f32();
 
-                slider(0.0..=1.0, elapsed / total, KantaMessage::PositionChanged)
+                slider(0.0..=1.0, elapsed / total, KantaMessage::PositionChanged).step(0.01)
             }
-            None => slider(0.0..=100.0, 0.0, KantaMessage::PositionChanged),
+            None => slider(0.0..=100.0, 0.0, KantaMessage::PositionChanged).step(0.01),
         };
 
+        let volume_slider =
+            slider(0.0..=1.0, self.sink.volume(), KantaMessage::VolumeChanged).step(0.01);
+
         column![
-            row![
-                button(match &self.selected_audio_path {
-                    Some(path) => path.to_str().unwrap(),
-                    None => "Select audio file",
-                })
-                .on_press(KantaMessage::SelectAudioPath),
-            ],
-            row![
-                if self.sink.is_paused() {
-                    button("Play").on_press(KantaMessage::Play)
-                } else {
-                    button("Pause").on_press(KantaMessage::Pause)
-                },
-                text("Playback"),
-                playback_slider,
-                text("Volume"),
-                slider(0..=100, self.ui_volume, KantaMessage::VolumeChanged),
-            ],
+            select_audio_path_button,
+            play_pause_button,
+            text("Playback"),
+            position_slider,
+            text("Volume"),
+            volume_slider,
         ]
+        .padding(8)
+        .spacing(8)
         .into()
     }
 
@@ -111,16 +87,15 @@ impl Kanta {
                 let Some(path) = FileDialog::new().pick_file() else {
                     return;
                 };
-
                 let Ok(file) = File::open(path) else { return };
-
                 let source = Decoder::try_from(BufReader::new(file)).unwrap().buffered();
-
                 self.source = Some(Box::new(source.clone()));
                 self.sink.append(source.clone());
             }
+
             Play => self.sink.play(),
             Pause => self.sink.pause(),
+
             PositionChanged(x) => match &self.source {
                 Some(source) => {
                     let total = source.total_duration().unwrap().as_secs_f32();
@@ -129,15 +104,15 @@ impl Kanta {
                 }
                 None => {}
             },
-            VolumeChanged(volume) => {
-                self.sink.set_volume(volume as f32 / 100.0);
-                self.ui_volume = volume;
-            }
-            Tick(_) => {}
+
+            VolumeChanged(volume) => self.sink.set_volume(volume),
+
+            // Tells Iced to rerender UI elements, especially the position slider
+            UpdatePositionSlider => {}
         }
     }
 
     fn subscription(&self) -> Subscription<KantaMessage> {
-        frames().map(KantaMessage::Tick)
+        time::every(Duration::from_millis(500)).map(|_| KantaMessage::UpdatePositionSlider)
     }
 }
