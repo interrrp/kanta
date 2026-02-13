@@ -5,4 +5,6 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.101"
+iced = "0.14.0"
+rfd = "0.17.2"
 rodio = "0.21.1"
