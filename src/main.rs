@@ -107,15 +107,15 @@ impl Kanta {
                 .spacing(8)
         };
 
-        let lyrics = match &self.current_track {
-            Some(track) if matches!(&track.lyrics, Some(_)) => {
-                if let Some(lyrics) = &track.lyrics {
-                    container(scrollable(text(lyrics)).width(Length::Fill))
-                } else {
-                    container(text(""))
-                }
-            }
-            _ => container(text("No lyrics available").color(Color::from_rgba(1.0, 1.0, 1.0, 0.5))),
+        let muted = Color::from_rgba(1.0, 1.0, 1.0, 0.5);
+
+        let lyrics = match self
+            .current_track
+            .as_ref()
+            .and_then(|track| track.lyrics.as_ref())
+        {
+            Some(lyrics) => container(scrollable(text(lyrics)).width(Length::Fill)),
+            None => container(text("No lyrics available").color(muted)),
         };
 
         column![]
