@@ -157,10 +157,8 @@ impl Kanta {
             .as_ref()
             .and_then(|track| track.lyrics.as_ref())
         {
-            Some(lyrics) => {
-                container(scrollable(text(lyrics)).width(Length::Fill)).width(Length::Fill)
-            }
-            None => container(text("No lyrics available").color(muted)).width(Length::Fill),
+            Some(lyrics) => scrollable(text(lyrics)).width(Length::Fill),
+            None => scrollable(text("No lyrics available").color(muted)).width(Length::Fill),
         };
 
         let add_track_button = button("Add track").on_press(KantaMessage::SelectAudioPath);
@@ -193,7 +191,11 @@ impl Kanta {
             .width(Length::Fill)
             .spacing(8);
 
-        let bottom_row = row![lyrics, queue].width(Length::Fill).spacing(8);
+        let bottom_row = row![]
+            .push(lyrics)
+            .push(queue)
+            .width(Length::Fill)
+            .spacing(8);
 
         column![]
             .push(controls)
