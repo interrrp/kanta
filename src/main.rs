@@ -1,4 +1,4 @@
-use std::{fs::File, io::BufReader, path::PathBuf, time::Duration};
+use std::{fs::File, io::BufReader, time::Duration};
 
 use iced::{
     Color, Element, Length, Subscription,
@@ -30,7 +30,7 @@ struct Kanta {
     stream: OutputStream,
     sink: Sink,
     source: Option<Box<dyn Source>>,
-    current_track_path: Option<PathBuf>,
+    current_track_name: Option<String>,
     current_lyrics: Option<String>,
 }
 
@@ -53,7 +53,7 @@ impl Kanta {
             stream,
             sink,
             source: None,
-            current_track_path: None,
+            current_track_name: None,
             current_lyrics: None,
         }
     }
@@ -63,8 +63,8 @@ impl Kanta {
             .push(
                 row![]
                     .push(button("Select audio file").on_press(KantaMessage::SelectAudioPath))
-                    .push(text(match &self.current_track_path {
-                        Some(p) => p.to_str().unwrap(),
+                    .push(text(match &self.current_track_name {
+                        Some(name) => name,
                         None => "None",
                     }))
                     .align_y(Vertical::Center)
@@ -143,7 +143,8 @@ impl Kanta {
                     }
                 }
 
-                self.current_track_path = Some(path);
+                self.current_track_name =
+                    Some(path.file_name().unwrap().to_string_lossy().to_string());
             }
 
             Play => self.sink.play(),
