@@ -87,6 +87,7 @@ enum KantaMessage {
     Prev,
     Next,
     Jump(usize),
+    ClearQueue,
     PositionChanged(f32),
     VolumeChanged(f32),
     Tick,
@@ -161,7 +162,15 @@ impl Kanta {
             None => scrollable(text("No lyrics available").color(muted)).width(Length::Fill),
         };
 
-        let add_track_button = button("Add track").on_press(KantaMessage::SelectAudioPath);
+        let queue_controls = {
+            let add_track_button = button("Add track").on_press(KantaMessage::SelectAudioPath);
+
+            let clear_button = button("Clear")
+                .on_press(KantaMessage::ClearQueue)
+                .style(button::danger);
+
+            row![].push(add_track_button).push(clear_button).spacing(8)
+        };
 
         let mut queue_songs = column![].spacing(8);
         for (index, track) in self.queue.iter().enumerate() {
@@ -186,7 +195,7 @@ impl Kanta {
         }
 
         let queue = column![]
-            .push(add_track_button)
+            .push(queue_controls)
             .push(scrollable(queue_songs))
             .width(Length::Fill)
             .spacing(8);
@@ -224,6 +233,10 @@ impl Kanta {
             Next => self.next(),
             Jump(index) => {
                 self.queue_pos = Some(index);
+                self.update_sink_to_current_track();
+            }
+            ClearQueue => {
+                self.queue.clear();
                 self.update_sink_to_current_track();
             }
 
@@ -280,6 +293,13 @@ impl Kanta {
     }
 
     fn update_sink_to_current_track(&mut self) {
+        if self.queue.is_empty() {
+            while !self.sink.is_paused() && !self.sink.empty() {
+                self.sink.skip_one();
+            }
+            return;
+        }
+
         if let Some(track) = self.current_track() {
             if !self.sink.is_paused() && !self.sink.empty() {
                 self.sink.skip_one();
