@@ -61,55 +61,67 @@ impl Kanta {
     }
 
     fn view(&self) -> Element<'_, KantaMessage> {
-        column![]
-            .push(
-                row![]
-                    .push(button("Select audio file").on_press(KantaMessage::SelectAudioPath))
-                    .push(text(match &self.current_track {
-                        Some(track) => &track.name,
-                        None => "None",
-                    }))
-                    .align_y(Vertical::Center)
-                    .spacing(8),
-            )
-            .push(
-                row![]
-                    .push(if self.sink.is_paused() {
-                        button("Play").on_press(KantaMessage::Play)
-                    } else {
-                        button("Pause").on_press(KantaMessage::Pause)
-                    })
-                    .push(text("Position"))
-                    .push(match &self.current_track {
-                        Some(track) => {
-                            let elapsed = self.sink.get_pos().as_secs_f32();
-                            let total = track.source.total_duration().unwrap().as_secs_f32();
+        let file_row = {
+            let select_audio_file_button =
+                button("Select audio file").on_press(KantaMessage::SelectAudioPath);
 
-                            slider(0.0..=1.0, elapsed / total, KantaMessage::PositionChanged)
-                                .step(0.01)
-                        }
-                        None => slider(0.0..=100.0, 0.0, KantaMessage::PositionChanged).step(0.01),
-                    })
-                    .push(text("Volume"))
-                    .push(
-                        slider(0.0..=1.0, self.sink.volume(), KantaMessage::VolumeChanged)
-                            .step(0.01),
-                    )
-                    .align_y(Vertical::Center)
-                    .spacing(8),
-            )
-            .push(match &self.current_track {
-                Some(track) if matches!(&track.lyrics, Some(_)) => {
-                    if let Some(lyrics) = &track.lyrics {
-                        container(scrollable(text(lyrics)).width(Length::Fill))
-                    } else {
-                        container(text(""))
-                    }
+            let track_name = match &self.current_track {
+                Some(track) => &track.name,
+                None => "None",
+            };
+
+            row![]
+                .push(select_audio_file_button)
+                .push(text(track_name))
+                .align_y(Vertical::Center)
+                .spacing(8)
+        };
+
+        let controls = {
+            let play_pause_button = if self.sink.is_paused() {
+                button("Play").on_press(KantaMessage::Play)
+            } else {
+                button("Pause").on_press(KantaMessage::Pause)
+            };
+
+            let position_slider = match &self.current_track {
+                Some(track) => {
+                    let elapsed = self.sink.get_pos().as_secs_f32();
+                    let total = track.source.total_duration().unwrap().as_secs_f32();
+
+                    slider(0.0..=1.0, elapsed / total, KantaMessage::PositionChanged).step(0.01)
                 }
-                _ => container(
-                    text("No lyrics available").color(Color::from_rgba(1.0, 1.0, 1.0, 0.5)),
-                ),
-            })
+                None => slider(0.0..=100.0, 0.0, KantaMessage::PositionChanged).step(0.01),
+            };
+
+            let volume_slider =
+                slider(0.0..=1.0, self.sink.volume(), KantaMessage::VolumeChanged).step(0.01);
+
+            row![]
+                .push(play_pause_button)
+                .push(text("Position"))
+                .push(position_slider)
+                .push(text("Volume"))
+                .push(volume_slider)
+                .align_y(Vertical::Center)
+                .spacing(8)
+        };
+
+        let lyrics = match &self.current_track {
+            Some(track) if matches!(&track.lyrics, Some(_)) => {
+                if let Some(lyrics) = &track.lyrics {
+                    container(scrollable(text(lyrics)).width(Length::Fill))
+                } else {
+                    container(text(""))
+                }
+            }
+            _ => container(text("No lyrics available").color(Color::from_rgba(1.0, 1.0, 1.0, 0.5))),
+        };
+
+        column![]
+            .push(file_row)
+            .push(controls)
+            .push(lyrics)
             .padding(8)
             .spacing(8)
             .into()
@@ -154,7 +166,7 @@ impl Kanta {
                     source: Box::new(source),
                     name,
                     lyrics,
-                })
+                });
             }
 
             Play => self.sink.play(),
