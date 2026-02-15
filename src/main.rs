@@ -116,12 +116,11 @@ impl Kanta {
                 };
                 let Ok(file) = File::open(&path) else { return };
                 let source = Decoder::try_from(BufReader::new(file)).unwrap().buffered();
-                let should_skip = self.source.is_some();
                 self.source = Some(Box::new(source.clone()));
-                self.sink.append(source.clone());
-                if should_skip {
+                if !self.sink.empty() && !self.sink.is_paused() {
                     self.sink.skip_one();
                 }
+                self.sink.append(source.clone());
 
                 // Read lyrics
                 let Ok(file) = File::open(&path) else { return };
