@@ -86,6 +86,7 @@ enum KantaMessage {
     Pause,
     Prev,
     Next,
+    Jump(usize),
     PositionChanged(f32),
     VolumeChanged(f32),
     Tick,
@@ -106,11 +107,23 @@ impl Kanta {
 
     fn view(&self) -> Element<'_, KantaMessage> {
         let controls = {
-            let play_pause_button = if self.sink.is_paused() {
-                button("Play").on_press(KantaMessage::Play)
+            let play_pause_button = if self.current_track().is_some() {
+                if self.sink.is_paused() {
+                    button("Play").on_press(KantaMessage::Play)
+                } else {
+                    button("Pause").on_press(KantaMessage::Pause)
+                }
             } else {
-                button("Pause").on_press(KantaMessage::Pause)
+                button("Nothing playing")
             };
+
+            let prev_button = button("Prev")
+                .on_press(KantaMessage::Prev)
+                .style(button::secondary);
+
+            let next_button = button("Next")
+                .on_press(KantaMessage::Next)
+                .style(button::secondary);
 
             let position_slider = match &self.current_track() {
                 Some(track) => {
@@ -126,7 +139,9 @@ impl Kanta {
                 slider(0.0..=1.0, self.sink.volume(), KantaMessage::VolumeChanged).step(0.01);
 
             row![]
+                .push(prev_button)
                 .push(play_pause_button)
+                .push(next_button)
                 .push(text("Position"))
                 .push(position_slider)
                 .push(text("Volume"))
@@ -148,32 +163,35 @@ impl Kanta {
             None => container(text("No lyrics available").color(muted)).width(Length::Fill),
         };
 
-        let queue_controls = {
-            let add_track_button = button("Add track").on_press(KantaMessage::SelectAudioPath);
-            let prev_button = button("Prev").on_press(KantaMessage::Prev);
-            let next_button = button("Next").on_press(KantaMessage::Next);
-            row![add_track_button, prev_button, next_button].spacing(8)
-        };
+        let add_track_button = button("Add track").on_press(KantaMessage::SelectAudioPath);
 
         let mut queue_songs = column![].spacing(8);
         for (index, track) in self.queue.iter().enumerate() {
-            queue_songs = queue_songs.push(container(text(&track.name)).padding(Padding {
-                left: if self.queue_pos == Some(index) {
-                    16.0
-                } else {
-                    2.0
-                },
-                top: 0.0,
-                bottom: 0.0,
-                right: 0.0,
-            }));
+            queue_songs = queue_songs.push(
+                container(
+                    button(track.name.as_str())
+                        .on_press(KantaMessage::Jump(index))
+                        .padding(0)
+                        .style(button::text),
+                )
+                .padding(Padding {
+                    left: if self.queue_pos == Some(index) {
+                        16.0
+                    } else {
+                        2.0
+                    },
+                    top: 0.0,
+                    bottom: 0.0,
+                    right: 0.0,
+                }),
+            );
         }
 
         let queue = column![]
+            .push(add_track_button)
+            .push(scrollable(queue_songs))
             .width(Length::Fill)
-            .spacing(8)
-            .push(queue_controls)
-            .push(scrollable(queue_songs));
+            .spacing(8);
 
         let bottom_row = row![lyrics, queue].width(Length::Fill).spacing(8);
 
@@ -202,6 +220,10 @@ impl Kanta {
 
             Prev => self.prev(),
             Next => self.next(),
+            Jump(index) => {
+                self.queue_pos = Some(index);
+                self.update_sink_to_current_track();
+            }
 
             PositionChanged(x) => match self.current_track() {
                 Some(track) => {
@@ -246,7 +268,9 @@ impl Kanta {
         }
 
         self.queue_pos = match self.queue_pos {
-            Some(x) => Some(x + 1),
+            // Do nothing if this is the last song in queue
+            Some(pos) if pos == self.queue.len() - 1 => Some(pos),
+            Some(pos) => Some(pos + 1),
             None => Some(0),
         };
 
