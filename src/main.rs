@@ -142,7 +142,9 @@ impl Kanta {
             .as_ref()
             .and_then(|track| track.lyrics.as_ref())
         {
-            Some(lyrics) => container(scrollable(text(lyrics))).width(Length::Fill),
+            Some(lyrics) => {
+                container(scrollable(text(lyrics)).width(Length::Fill)).width(Length::Fill)
+            }
             None => container(text("No lyrics available").color(muted)).width(Length::Fill),
         };
 
