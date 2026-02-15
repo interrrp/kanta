@@ -1,4 +1,4 @@
-use std::{fs::File, io::BufReader, time::Duration};
+use std::{fs::File, io::BufReader, path::Path, time::Duration};
 
 use iced::{
     Color, Element, Length, Subscription,
@@ -7,7 +7,7 @@ use iced::{
     widget::{button, column, container, row, scrollable, slider, text},
 };
 use rfd::FileDialog;
-use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
+use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source, source::Buffered};
 use symphonia::{
     core::{
         io::MediaSourceStream,
@@ -33,9 +33,45 @@ struct Kanta {
 }
 
 struct Track {
-    source: Box<dyn Source>,
+    source: Buffered<Decoder<BufReader<File>>>,
     name: String,
     lyrics: Option<String>,
+}
+
+impl TryFrom<&Path> for Track {
+    type Error = anyhow::Error;
+
+    fn try_from(path: &Path) -> anyhow::Result<Track> {
+        let file = File::open(path)?;
+        let reader = BufReader::new(file);
+        let source = Decoder::try_from(reader)?.buffered();
+
+        let file = File::open(path)?;
+        let mss = MediaSourceStream::new(Box::new(file), Default::default());
+        let hint = Hint::new();
+        let mut probed = get_probe()
+            .format(&hint, mss, &Default::default(), &MetadataOptions::default())
+            .unwrap();
+        let mut lyrics: Option<String> = None;
+        if let Some(rev) = probed.format.metadata().current() {
+            if let Some(lyric_tag) = rev
+                .tags()
+                .iter()
+                .find(|t| t.std_key == Some(StandardTagKey::Lyrics))
+                .map(|t| t.value.to_string())
+            {
+                lyrics = Some(lyric_tag);
+            }
+        }
+
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+
+        Ok(Track {
+            source,
+            name,
+            lyrics,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -134,39 +170,16 @@ impl Kanta {
                 let Some(path) = FileDialog::new().pick_file() else {
                     return;
                 };
-                let Ok(file) = File::open(&path) else { return };
-                let source = Decoder::try_from(BufReader::new(file)).unwrap().buffered();
-                if !self.sink.empty() && !self.sink.is_paused() {
+
+                // Skip any playing track
+                if !self.sink.is_paused() && !self.sink.empty() {
                     self.sink.skip_one();
                 }
-                self.sink.append(source.clone());
 
-                // Read lyrics
-                let Ok(file) = File::open(&path) else { return };
-                let mss = MediaSourceStream::new(Box::new(file), Default::default());
-                let hint = Hint::new();
-                let mut probed = get_probe()
-                    .format(&hint, mss, &Default::default(), &MetadataOptions::default())
-                    .unwrap();
-                let mut lyrics: Option<String> = None;
-                if let Some(rev) = probed.format.metadata().current() {
-                    if let Some(lyric_tag) = rev
-                        .tags()
-                        .iter()
-                        .find(|t| t.std_key == Some(StandardTagKey::Lyrics))
-                        .map(|t| t.value.to_string())
-                    {
-                        lyrics = Some(lyric_tag);
-                    }
-                }
+                let track = Track::try_from(path.as_path()).unwrap();
+                self.sink.append(track.source.clone());
 
-                let name = path.file_name().unwrap().to_string_lossy().to_string();
-
-                self.current_track = Some(Track {
-                    source: Box::new(source),
-                    name,
-                    lyrics,
-                });
+                self.current_track = Some(track);
             }
 
             Play => self.sink.play(),
