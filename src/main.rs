@@ -1,7 +1,7 @@
 use std::{fs::File, io::BufReader, path::Path, time::Duration};
 
 use iced::{
-    Color, Element, Length, Subscription,
+    Color, Element, Length, Pixels, Settings, Subscription,
     alignment::Vertical,
     application, time,
     widget::{button, column, container, row, scrollable, slider, text},
@@ -22,6 +22,10 @@ fn main() -> iced::Result {
         .subscription(Kanta::subscription)
         .title("Kanta")
         .window_size((640, 360))
+        .settings(Settings {
+            default_text_size: Pixels(14.0),
+            ..Default::default()
+        })
         .run()
 }
 
