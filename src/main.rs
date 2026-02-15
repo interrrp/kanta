@@ -1,7 +1,7 @@
-use std::{fs::File, io::BufReader, path::Path, time::Duration};
+use std::{collections::VecDeque, fs::File, io::BufReader, path::Path, time::Duration};
 
 use iced::{
-    Color, Element, Length, Pixels, Settings, Subscription,
+    Color, Element, Length, Padding, Pixels, Settings, Subscription,
     alignment::Vertical,
     application, time,
     widget::{button, column, container, row, scrollable, slider, text},
@@ -33,7 +33,8 @@ struct Kanta {
     #[allow(dead_code)] // stream needs to live as long as the application
     stream: OutputStream,
     sink: Sink,
-    current_track: Option<Track>,
+    queue: VecDeque<Track>,
+    queue_pos: Option<usize>,
 }
 
 struct Track {
@@ -83,9 +84,11 @@ enum KantaMessage {
     SelectAudioPath,
     Play,
     Pause,
+    Prev,
+    Next,
     PositionChanged(f32),
     VolumeChanged(f32),
-    UpdatePositionSlider,
+    Tick,
 }
 
 impl Kanta {
@@ -96,27 +99,12 @@ impl Kanta {
         Kanta {
             stream,
             sink,
-            current_track: None,
+            queue: VecDeque::new(),
+            queue_pos: None,
         }
     }
 
     fn view(&self) -> Element<'_, KantaMessage> {
-        let file_row = {
-            let select_audio_file_button =
-                button("Select audio file").on_press(KantaMessage::SelectAudioPath);
-
-            let track_name = match &self.current_track {
-                Some(track) => &track.name,
-                None => "None",
-            };
-
-            row![]
-                .push(select_audio_file_button)
-                .push(text(track_name))
-                .align_y(Vertical::Center)
-                .spacing(8)
-        };
-
         let controls = {
             let play_pause_button = if self.sink.is_paused() {
                 button("Play").on_press(KantaMessage::Play)
@@ -124,7 +112,7 @@ impl Kanta {
                 button("Pause").on_press(KantaMessage::Pause)
             };
 
-            let position_slider = match &self.current_track {
+            let position_slider = match &self.current_track() {
                 Some(track) => {
                     let elapsed = self.sink.get_pos().as_secs_f32();
                     let total = track.source.total_duration().unwrap().as_secs_f32();
@@ -150,18 +138,46 @@ impl Kanta {
         let muted = Color::from_rgba(1.0, 1.0, 1.0, 0.5);
 
         let lyrics = match self
-            .current_track
+            .current_track()
             .as_ref()
             .and_then(|track| track.lyrics.as_ref())
         {
-            Some(lyrics) => container(scrollable(text(lyrics)).width(Length::Fill)),
-            None => container(text("No lyrics available").color(muted)),
+            Some(lyrics) => container(scrollable(text(lyrics))).width(Length::Fill),
+            None => container(text("No lyrics available").color(muted)).width(Length::Fill),
         };
 
+        let queue_controls = {
+            let add_track_button = button("Add track").on_press(KantaMessage::SelectAudioPath);
+            let prev_button = button("Prev").on_press(KantaMessage::Prev);
+            let next_button = button("Next").on_press(KantaMessage::Next);
+            row![add_track_button, prev_button, next_button].spacing(8)
+        };
+
+        let mut queue_songs = column![].spacing(8);
+        for (index, track) in self.queue.iter().enumerate() {
+            queue_songs = queue_songs.push(container(text(&track.name)).padding(Padding {
+                left: if self.queue_pos == Some(index) {
+                    16.0
+                } else {
+                    2.0
+                },
+                top: 0.0,
+                bottom: 0.0,
+                right: 0.0,
+            }));
+        }
+
+        let queue = column![]
+            .width(Length::Fill)
+            .spacing(8)
+            .push(queue_controls)
+            .push(scrollable(queue_songs));
+
+        let bottom_row = row![lyrics, queue].width(Length::Fill).spacing(8);
+
         column![]
-            .push(file_row)
             .push(controls)
-            .push(lyrics)
+            .push(bottom_row)
             .padding(8)
             .spacing(8)
             .into()
@@ -175,21 +191,17 @@ impl Kanta {
                     return;
                 };
 
-                // Skip any playing track
-                if !self.sink.is_paused() && !self.sink.empty() {
-                    self.sink.skip_one();
-                }
-
                 let track = Track::try_from(path.as_path()).unwrap();
-                self.sink.append(track.source.clone());
-
-                self.current_track = Some(track);
+                self.queue.push_back(track);
             }
 
             Play => self.sink.play(),
             Pause => self.sink.pause(),
 
-            PositionChanged(x) => match &self.current_track {
+            Prev => self.prev(),
+            Next => self.next(),
+
+            PositionChanged(x) => match self.current_track() {
                 Some(track) => {
                     let total = track.source.total_duration().unwrap().as_secs_f32();
                     let duration = Duration::from_secs_f32(total * x);
@@ -200,12 +212,63 @@ impl Kanta {
 
             VolumeChanged(volume) => self.sink.set_volume(volume),
 
-            // Tells Iced to rerender UI elements, especially the position slider
-            UpdatePositionSlider => {}
+            Tick => {
+                if self.sink.empty() {
+                    self.next();
+                }
+            }
+        }
+    }
+
+    fn prev(&mut self) {
+        if self.queue.is_empty() {
+            return;
+        }
+
+        let Some(queue_pos) = self.queue_pos.as_mut() else {
+            return;
+        };
+
+        if *queue_pos > 0 {
+            *queue_pos -= 1;
+        } else {
+            return;
+        }
+
+        self.update_sink_to_current_track();
+    }
+
+    fn next(&mut self) {
+        if self.queue.is_empty() {
+            return;
+        }
+
+        self.queue_pos = match self.queue_pos {
+            Some(x) => Some(x + 1),
+            None => Some(0),
+        };
+
+        self.update_sink_to_current_track();
+    }
+
+    fn update_sink_to_current_track(&mut self) {
+        if let Some(track) = self.current_track() {
+            if !self.sink.is_paused() && !self.sink.empty() {
+                self.sink.skip_one();
+            }
+
+            self.sink.append(track.source.clone());
+        }
+    }
+
+    fn current_track(&self) -> Option<&Track> {
+        match self.queue_pos {
+            Some(pos) => self.queue.get(pos),
+            None => None,
         }
     }
 
     fn subscription(&self) -> Subscription<KantaMessage> {
-        time::every(Duration::from_millis(500)).map(|_| KantaMessage::UpdatePositionSlider)
+        time::every(Duration::from_millis(10)).map(|_| KantaMessage::Tick)
     }
 }
