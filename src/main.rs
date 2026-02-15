@@ -1,8 +1,10 @@
-use std::{fs::File, io::BufReader, time::Duration};
+use std::{fs::File, io::BufReader, path::PathBuf, time::Duration};
 
 use iced::{
-    Element, Subscription, application, time,
-    widget::{button, column, slider, text},
+    Element, Subscription,
+    alignment::Vertical,
+    application, time,
+    widget::{button, column, row, slider, text},
 };
 use rfd::FileDialog;
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
@@ -20,6 +22,7 @@ struct Kanta {
     stream: OutputStream,
     sink: Sink,
     source: Option<Box<dyn Source>>,
+    current_track_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -41,43 +44,51 @@ impl Kanta {
             stream,
             sink,
             source: None,
+            current_track_path: None,
         }
     }
 
     fn view(&self) -> Element<'_, KantaMessage> {
-        let select_audio_path_button =
-            button("Select audio file").on_press(KantaMessage::SelectAudioPath);
+        column![]
+            .push(
+                row![]
+                    .push(button("Select audio file").on_press(KantaMessage::SelectAudioPath))
+                    .push(text(match &self.current_track_path {
+                        Some(p) => p.to_str().unwrap(),
+                        None => "None",
+                    }))
+                    .align_y(Vertical::Center)
+                    .spacing(8),
+            )
+            .push(
+                row![]
+                    .push(if self.sink.is_paused() {
+                        button("Play").on_press(KantaMessage::Play)
+                    } else {
+                        button("Pause").on_press(KantaMessage::Pause)
+                    })
+                    .push(text("Position"))
+                    .push(match &self.source {
+                        Some(src) => {
+                            let elapsed = self.sink.get_pos().as_secs_f32();
+                            let total = src.total_duration().unwrap().as_secs_f32();
 
-        let play_pause_button = if self.sink.is_paused() {
-            button("Play").on_press(KantaMessage::Play)
-        } else {
-            button("Pause").on_press(KantaMessage::Pause)
-        };
-
-        let position_slider = match &self.source {
-            Some(src) => {
-                let elapsed = self.sink.get_pos().as_secs_f32();
-                let total = src.total_duration().unwrap().as_secs_f32();
-
-                slider(0.0..=1.0, elapsed / total, KantaMessage::PositionChanged).step(0.01)
-            }
-            None => slider(0.0..=100.0, 0.0, KantaMessage::PositionChanged).step(0.01),
-        };
-
-        let volume_slider =
-            slider(0.0..=1.0, self.sink.volume(), KantaMessage::VolumeChanged).step(0.01);
-
-        column![
-            select_audio_path_button,
-            play_pause_button,
-            text("Playback"),
-            position_slider,
-            text("Volume"),
-            volume_slider,
-        ]
-        .padding(8)
-        .spacing(8)
-        .into()
+                            slider(0.0..=1.0, elapsed / total, KantaMessage::PositionChanged)
+                                .step(0.01)
+                        }
+                        None => slider(0.0..=100.0, 0.0, KantaMessage::PositionChanged).step(0.01),
+                    })
+                    .push(text("Volume"))
+                    .push(
+                        slider(0.0..=1.0, self.sink.volume(), KantaMessage::VolumeChanged)
+                            .step(0.01),
+                    )
+                    .align_y(Vertical::Center)
+                    .spacing(8),
+            )
+            .padding(8)
+            .spacing(8)
+            .into()
     }
 
     fn update(&mut self, message: KantaMessage) {
@@ -87,7 +98,7 @@ impl Kanta {
                 let Some(path) = FileDialog::new().pick_file() else {
                     return;
                 };
-                let Ok(file) = File::open(path) else { return };
+                let Ok(file) = File::open(&path) else { return };
                 let source = Decoder::try_from(BufReader::new(file)).unwrap().buffered();
                 let should_skip = self.source.is_some();
                 self.source = Some(Box::new(source.clone()));
@@ -95,6 +106,7 @@ impl Kanta {
                 if should_skip {
                     self.sink.skip_one();
                 }
+                self.current_track_path = Some(path);
             }
 
             Play => self.sink.play(),
