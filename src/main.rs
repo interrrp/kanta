@@ -1,10 +1,10 @@
 use std::{fs::File, io::BufReader, path::PathBuf, time::Duration};
 
 use iced::{
-    Element, Length, Subscription,
+    Color, Element, Length, Subscription,
     alignment::Vertical,
     application, time,
-    widget::{button, column, row, scrollable, slider, text},
+    widget::{button, column, container, row, scrollable, slider, text},
 };
 use rfd::FileDialog;
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
@@ -31,7 +31,7 @@ struct Kanta {
     sink: Sink,
     source: Option<Box<dyn Source>>,
     current_track_path: Option<PathBuf>,
-    current_lyrics: String,
+    current_lyrics: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,7 +54,7 @@ impl Kanta {
             sink,
             source: None,
             current_track_path: None,
-            current_lyrics: "".to_string(),
+            current_lyrics: None,
         }
     }
 
@@ -96,7 +96,12 @@ impl Kanta {
                     .align_y(Vertical::Center)
                     .spacing(8),
             )
-            .push(scrollable(text(&self.current_lyrics)).width(Length::Fill))
+            .push(match &self.current_lyrics {
+                Some(lyrics) => container(scrollable(text(lyrics)).width(Length::Fill)),
+                None => container(
+                    text("No lyrics available").color(Color::from_rgba(1.0, 1.0, 1.0, 0.5)),
+                ),
+            })
             .padding(8)
             .spacing(8)
             .into()
@@ -132,9 +137,9 @@ impl Kanta {
                         .find(|t| t.std_key == Some(StandardTagKey::Lyrics))
                         .map(|t| t.value.to_string())
                     {
-                        self.current_lyrics = lyrics;
+                        self.current_lyrics = Some(lyrics);
                     } else {
-                        self.current_lyrics = "".to_string();
+                        self.current_lyrics = None;
                     }
                 }
 
