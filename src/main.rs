@@ -1,3 +1,5 @@
+#![deny(clippy::all)]
+
 use std::{collections::VecDeque, fs::File, io::BufReader, path::Path, time::Duration};
 
 use iced::{
@@ -58,15 +60,14 @@ impl TryFrom<&Path> for Track {
             .format(&hint, mss, &Default::default(), &MetadataOptions::default())
             .unwrap();
         let mut lyrics: Option<String> = None;
-        if let Some(rev) = probed.format.metadata().current() {
-            if let Some(lyric_tag) = rev
+        if let Some(rev) = probed.format.metadata().current()
+            && let Some(lyric_tag) = rev
                 .tags()
                 .iter()
                 .find(|t| t.std_key == Some(StandardTagKey::Lyrics))
                 .map(|t| t.value.to_string())
-            {
-                lyrics = Some(lyric_tag);
-            }
+        {
+            lyrics = Some(lyric_tag);
         }
 
         let name = path.file_name().unwrap().to_string_lossy().to_string();
@@ -240,14 +241,13 @@ impl Kanta {
                 self.update_sink_to_current_track();
             }
 
-            PositionChanged(x) => match self.current_track() {
-                Some(track) => {
+            PositionChanged(x) => {
+                if let Some(track) = self.current_track() {
                     let total = track.source.total_duration().unwrap().as_secs_f32();
                     let duration = Duration::from_secs_f32(total * x);
                     let _ = self.sink.try_seek(duration);
                 }
-                None => {}
-            },
+            }
 
             VolumeChanged(volume) => self.sink.set_volume(volume),
 
