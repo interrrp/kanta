@@ -1,13 +1,21 @@
 use std::{fs::File, io::BufReader, path::PathBuf, time::Duration};
 
 use iced::{
-    Element, Subscription,
+    Element, Length, Subscription,
     alignment::Vertical,
     application, time,
-    widget::{button, column, row, slider, text},
+    widget::{button, column, row, scrollable, slider, text},
 };
 use rfd::FileDialog;
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
+use symphonia::{
+    core::{
+        io::MediaSourceStream,
+        meta::{MetadataOptions, StandardTagKey},
+        probe::Hint,
+    },
+    default::get_probe,
+};
 
 fn main() -> iced::Result {
     application(Kanta::new, Kanta::update, Kanta::view)
@@ -23,6 +31,7 @@ struct Kanta {
     sink: Sink,
     source: Option<Box<dyn Source>>,
     current_track_path: Option<PathBuf>,
+    current_lyrics: String,
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +54,7 @@ impl Kanta {
             sink,
             source: None,
             current_track_path: None,
+            current_lyrics: "".to_string(),
         }
     }
 
@@ -86,6 +96,7 @@ impl Kanta {
                     .align_y(Vertical::Center)
                     .spacing(8),
             )
+            .push(scrollable(text(&self.current_lyrics)).width(Length::Fill))
             .padding(8)
             .spacing(8)
             .into()
@@ -106,6 +117,27 @@ impl Kanta {
                 if should_skip {
                     self.sink.skip_one();
                 }
+
+                // Read lyrics
+                let Ok(file) = File::open(&path) else { return };
+                let mss = MediaSourceStream::new(Box::new(file), Default::default());
+                let hint = Hint::new();
+                let mut probed = get_probe()
+                    .format(&hint, mss, &Default::default(), &MetadataOptions::default())
+                    .unwrap();
+                if let Some(rev) = probed.format.metadata().current() {
+                    if let Some(lyrics) = rev
+                        .tags()
+                        .iter()
+                        .find(|t| t.std_key == Some(StandardTagKey::Lyrics))
+                        .map(|t| t.value.to_string())
+                    {
+                        self.current_lyrics = lyrics;
+                    } else {
+                        self.current_lyrics = "".to_string();
+                    }
+                }
+
                 self.current_track_path = Some(path);
             }
 
