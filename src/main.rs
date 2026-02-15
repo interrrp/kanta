@@ -29,9 +29,13 @@ struct Kanta {
     #[allow(dead_code)] // stream needs to live as long as the application
     stream: OutputStream,
     sink: Sink,
-    source: Option<Box<dyn Source>>,
-    current_track_name: Option<String>,
-    current_lyrics: Option<String>,
+    current_track: Option<Track>,
+}
+
+struct Track {
+    source: Box<dyn Source>,
+    name: String,
+    lyrics: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,9 +56,7 @@ impl Kanta {
         Kanta {
             stream,
             sink,
-            source: None,
-            current_track_name: None,
-            current_lyrics: None,
+            current_track: None,
         }
     }
 
@@ -63,8 +65,8 @@ impl Kanta {
             .push(
                 row![]
                     .push(button("Select audio file").on_press(KantaMessage::SelectAudioPath))
-                    .push(text(match &self.current_track_name {
-                        Some(name) => name,
+                    .push(text(match &self.current_track {
+                        Some(track) => &track.name,
                         None => "None",
                     }))
                     .align_y(Vertical::Center)
@@ -78,10 +80,10 @@ impl Kanta {
                         button("Pause").on_press(KantaMessage::Pause)
                     })
                     .push(text("Position"))
-                    .push(match &self.source {
-                        Some(src) => {
+                    .push(match &self.current_track {
+                        Some(track) => {
                             let elapsed = self.sink.get_pos().as_secs_f32();
-                            let total = src.total_duration().unwrap().as_secs_f32();
+                            let total = track.source.total_duration().unwrap().as_secs_f32();
 
                             slider(0.0..=1.0, elapsed / total, KantaMessage::PositionChanged)
                                 .step(0.01)
@@ -96,9 +98,15 @@ impl Kanta {
                     .align_y(Vertical::Center)
                     .spacing(8),
             )
-            .push(match &self.current_lyrics {
-                Some(lyrics) => container(scrollable(text(lyrics)).width(Length::Fill)),
-                None => container(
+            .push(match &self.current_track {
+                Some(track) if matches!(&track.lyrics, Some(_)) => {
+                    if let Some(lyrics) = &track.lyrics {
+                        container(scrollable(text(lyrics)).width(Length::Fill))
+                    } else {
+                        container(text(""))
+                    }
+                }
+                _ => container(
                     text("No lyrics available").color(Color::from_rgba(1.0, 1.0, 1.0, 0.5)),
                 ),
             })
@@ -116,7 +124,6 @@ impl Kanta {
                 };
                 let Ok(file) = File::open(&path) else { return };
                 let source = Decoder::try_from(BufReader::new(file)).unwrap().buffered();
-                self.source = Some(Box::new(source.clone()));
                 if !self.sink.empty() && !self.sink.is_paused() {
                     self.sink.skip_one();
                 }
@@ -129,29 +136,33 @@ impl Kanta {
                 let mut probed = get_probe()
                     .format(&hint, mss, &Default::default(), &MetadataOptions::default())
                     .unwrap();
+                let mut lyrics: Option<String> = None;
                 if let Some(rev) = probed.format.metadata().current() {
-                    if let Some(lyrics) = rev
+                    if let Some(lyric_tag) = rev
                         .tags()
                         .iter()
                         .find(|t| t.std_key == Some(StandardTagKey::Lyrics))
                         .map(|t| t.value.to_string())
                     {
-                        self.current_lyrics = Some(lyrics);
-                    } else {
-                        self.current_lyrics = None;
+                        lyrics = Some(lyric_tag);
                     }
                 }
 
-                self.current_track_name =
-                    Some(path.file_name().unwrap().to_string_lossy().to_string());
+                let name = path.file_name().unwrap().to_string_lossy().to_string();
+
+                self.current_track = Some(Track {
+                    source: Box::new(source),
+                    name,
+                    lyrics,
+                })
             }
 
             Play => self.sink.play(),
             Pause => self.sink.pause(),
 
-            PositionChanged(x) => match &self.source {
-                Some(source) => {
-                    let total = source.total_duration().unwrap().as_secs_f32();
+            PositionChanged(x) => match &self.current_track {
+                Some(track) => {
+                    let total = track.source.total_duration().unwrap().as_secs_f32();
                     let duration = Duration::from_secs_f32(total * x);
                     let _ = self.sink.try_seek(duration);
                 }
