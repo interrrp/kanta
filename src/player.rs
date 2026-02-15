@@ -61,8 +61,9 @@ impl Player {
 
         if *queue_pos > 0 {
             *queue_pos -= 1;
-            self.update_sink_to_current_track();
         }
+
+        self.update_sink_to_current_track();
     }
 
     pub fn next(&mut self) {
