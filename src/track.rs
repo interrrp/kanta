@@ -1,10 +1,11 @@
 use std::{fs::File, io::BufReader, path::Path};
 
+use anyhow::bail;
 use rodio::{Decoder, Source, source::Buffered};
 use symphonia::{
     core::{
         io::MediaSourceStream,
-        meta::{MetadataOptions, StandardTagKey},
+        meta::{MetadataOptions, StandardTagKey, Tag},
         probe::Hint,
     },
     default::get_probe,
@@ -14,7 +15,9 @@ type TrackSource = Buffered<Decoder<BufReader<File>>>;
 
 pub struct Track {
     source: TrackSource,
-    name: String,
+    title: Option<String>,
+    album: Option<String>,
+    artist: Option<String>,
     lyrics: Option<String>,
 }
 
@@ -23,8 +26,16 @@ impl Track {
         &self.source
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    pub fn album(&self) -> Option<&str> {
+        self.album.as_deref()
+    }
+
+    pub fn artist(&self) -> Option<&str> {
+        self.artist.as_deref()
     }
 
     pub fn lyrics(&self) -> Option<&str> {
@@ -47,22 +58,28 @@ impl TryFrom<&Path> for Track {
             .format(&hint, mss, &Default::default(), &MetadataOptions::default())
             .unwrap();
         let mut lyrics: Option<String> = None;
-        if let Some(rev) = probed.format.metadata().current()
-            && let Some(lyric_tag) = rev
-                .tags()
-                .iter()
-                .find(|t| t.std_key == Some(StandardTagKey::Lyrics))
-                .map(|t| t.value.to_string())
-        {
+        let metadata = probed.format.metadata();
+        let Some(rev) = metadata.current() else {
+            bail!("No metadata")
+        };
+        let tags = rev.tags();
+
+        if let Some(lyric_tag) = find_tag(tags, StandardTagKey::Lyrics) {
             lyrics = Some(lyric_tag);
         }
 
-        let name = path.file_name().unwrap().to_string_lossy().to_string();
-
         Ok(Track {
             source,
-            name,
+            title: find_tag(tags, StandardTagKey::TrackTitle),
+            album: find_tag(tags, StandardTagKey::Album),
+            artist: find_tag(tags, StandardTagKey::Artist),
             lyrics,
         })
     }
+}
+
+fn find_tag(tags: &[Tag], key: StandardTagKey) -> Option<String> {
+    tags.iter()
+        .find(|t| t.std_key == Some(key))
+        .map(|t| t.value.to_string())
 }

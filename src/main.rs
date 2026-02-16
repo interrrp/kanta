@@ -6,7 +6,7 @@ use iced::{
     Color, Element, Length, Padding, Pixels, Settings, Subscription,
     alignment::Vertical,
     application, time,
-    widget::{button, column, container, row, scrollable, slider, text},
+    widget::{button, column, row, scrollable, slider, text},
 };
 use rfd::FileDialog;
 
@@ -115,25 +115,29 @@ impl Kanta {
             row![].push(add_track_button).push(clear_button).spacing(8)
         };
 
-        let mut queue_songs = column![].spacing(8);
+        let mut queue_songs = column![].spacing(16);
         for (index, track) in self.player.queue().iter().enumerate() {
             queue_songs = queue_songs.push(
-                container(
-                    button(track.name())
-                        .on_press(KantaMessage::Jump(index))
-                        .padding(0)
-                        .style(button::text),
+                button(
+                    column![]
+                        .push(text(track.title().unwrap_or("No title")).size(Pixels(16.0)))
+                        .push(text(track.album().unwrap_or("No album")).size(Pixels(14.0)))
+                        .push(text(track.artist().unwrap_or("No artist")).size(Pixels(12.0)))
+                        .spacing(2)
+                        .padding(Padding {
+                            left: if self.player.queue_pos() == Some(index) {
+                                16.0
+                            } else {
+                                2.0
+                            },
+                            top: 0.0,
+                            bottom: 0.0,
+                            right: 0.0,
+                        }),
                 )
-                .padding(Padding {
-                    left: if self.player.queue_pos() == Some(index) {
-                        16.0
-                    } else {
-                        2.0
-                    },
-                    top: 0.0,
-                    bottom: 0.0,
-                    right: 0.0,
-                }),
+                .on_press(KantaMessage::Jump(index))
+                .style(button::text)
+                .padding(0),
             );
         }
 
