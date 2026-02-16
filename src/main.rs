@@ -6,7 +6,7 @@ use iced::{
     Color, Element, Length, Padding, Pixels, Settings, Subscription,
     alignment::Vertical,
     application, time,
-    widget::{button, column, row, scrollable, slider, text},
+    widget::{button, column, container, row, scrollable, slider, text},
 };
 use rfd::FileDialog;
 
@@ -101,7 +101,13 @@ impl Kanta {
             .as_ref()
             .and_then(|track| track.lyrics())
         {
-            Some(lyrics) => scrollable(text(lyrics)).width(Length::Fill),
+            Some(lyrics) => scrollable(container(text(lyrics)).padding(Padding {
+                top: 0.0,
+                right: 18.0, // Prevent scrollbar from covering lyrics (scrollbar 10px + padding 8px)
+                bottom: 0.0,
+                left: 0.0,
+            }))
+            .width(Length::Fill),
             None => scrollable(text("No lyrics available").color(muted)).width(Length::Fill),
         };
 
