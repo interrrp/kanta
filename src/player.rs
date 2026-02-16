@@ -151,6 +151,6 @@ impl Player {
     }
 
     pub fn is_idle(&self) -> bool {
-        self.sink.empty() && self.sink.is_paused()
+        self.sink.empty() || self.sink.is_paused()
     }
 }
