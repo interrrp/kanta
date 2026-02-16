@@ -1,6 +1,6 @@
 #![deny(clippy::all)]
 
-use std::time::Duration;
+use std::{fs, path::PathBuf, time::Duration};
 
 use iced::{
     Color, Element, Length, Padding, Pixels, Settings, Subscription,
@@ -149,7 +149,7 @@ impl Kanta {
 
         let queue = column![]
             .push(queue_controls)
-            .push(scrollable(queue_songs))
+            .push(scrollable(queue_songs).width(Length::Fill))
             .width(Length::Fill)
             .spacing(8);
 
@@ -175,8 +175,20 @@ impl Kanta {
                     return;
                 };
 
-                let track = Track::try_from(path.as_path()).unwrap();
-                self.player.add_to_queue(track);
+                let tracks_to_add = if path.extension().map(|s| s.to_str().unwrap()) == Some("m3u8")
+                {
+                    fs::read_to_string(path)
+                        .unwrap()
+                        .lines()
+                        .map(|line| Track::try_from(PathBuf::from(line).as_path()).unwrap())
+                        .collect()
+                } else {
+                    vec![Track::try_from(path.as_path()).unwrap()]
+                };
+
+                for track in tracks_to_add {
+                    self.player.add_to_queue(track);
+                }
             }
             Play => self.player.play(),
             Pause => self.player.pause(),
