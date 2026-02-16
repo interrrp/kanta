@@ -15,7 +15,7 @@ type TrackSource = Buffered<Decoder<BufReader<File>>>;
 
 pub struct Track {
     source: TrackSource,
-    title: Option<String>,
+    title: String,
     album: Option<String>,
     artist: Option<String>,
     lyrics: Option<String>,
@@ -26,8 +26,8 @@ impl Track {
         &self.source
     }
 
-    pub fn title(&self) -> Option<&str> {
-        self.title.as_deref()
+    pub fn title(&self) -> &str {
+        &self.title
     }
 
     pub fn album(&self) -> Option<&str> {
@@ -70,7 +70,8 @@ impl TryFrom<&Path> for Track {
 
         Ok(Track {
             source,
-            title: find_tag(tags, StandardTagKey::TrackTitle),
+            title: find_tag(tags, StandardTagKey::TrackTitle)
+                .unwrap_or(path.file_name().unwrap().to_string_lossy().to_string()),
             album: find_tag(tags, StandardTagKey::Album),
             artist: find_tag(tags, StandardTagKey::Artist),
             lyrics,

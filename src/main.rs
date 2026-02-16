@@ -120,7 +120,7 @@ impl Kanta {
             queue_songs = queue_songs.push(
                 button(
                     column![]
-                        .push(text(track.title().unwrap_or("No title")).size(Pixels(16.0)))
+                        .push(text(track.title()).size(Pixels(16.0)))
                         .push(text(track.album().unwrap_or("No album")).size(Pixels(14.0)))
                         .push(text(track.artist().unwrap_or("No artist")).size(Pixels(12.0)))
                         .spacing(2)
