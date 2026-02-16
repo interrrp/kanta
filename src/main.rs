@@ -20,7 +20,7 @@ fn main() -> iced::Result {
     application(Kanta::new, Kanta::update, Kanta::view)
         .subscription(Kanta::subscription)
         .title("Kanta")
-        .window_size((1280, 720))
+        .window_size((640, 360))
         .settings(Settings {
             default_text_size: Pixels(14.0),
             ..Default::default()
