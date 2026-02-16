@@ -199,7 +199,7 @@ impl Kanta {
             PositionChanged(pos) => self.player.set_pos(pos),
             VolumeChanged(volume) => self.player.set_volume(volume),
             Tick => {
-                if self.player.is_idle() {
+                if self.player.is_empty() {
                     self.player.next();
                 }
             }

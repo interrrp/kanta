@@ -109,6 +109,10 @@ impl Player {
         self.sink.is_paused()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.sink.empty()
+    }
+
     pub fn pos(&self) -> Option<f32> {
         let track = self.current_track()?;
         let elapsed = self.sink.get_pos().as_secs_f32();
@@ -148,9 +152,5 @@ impl Player {
     pub fn clear(&mut self) {
         self.queue.clear();
         self.update_sink_to_current_track();
-    }
-
-    pub fn is_idle(&self) -> bool {
-        self.sink.empty() || self.sink.is_paused()
     }
 }
