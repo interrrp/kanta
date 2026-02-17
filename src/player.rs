@@ -9,8 +9,8 @@ pub struct Player {
     stream: OutputStream,
     sink: Sink,
     current_track_duration: Option<Duration>,
-    queue: Vec<Track>,
-    queue_pos: Option<usize>,
+    playlist: Vec<Track>,
+    playlist_pos: Option<usize>,
 }
 
 impl Player {
@@ -22,60 +22,60 @@ impl Player {
             stream,
             sink,
             current_track_duration: None,
-            queue: vec![],
-            queue_pos: None,
+            playlist: vec![],
+            playlist_pos: None,
         }
     }
 
-    pub fn queue(&self) -> &[Track] {
-        self.queue.as_slice()
+    pub fn playlist(&self) -> &[Track] {
+        self.playlist.as_slice()
     }
 
-    pub fn queue_pos(&self) -> Option<usize> {
-        self.queue_pos
+    pub fn playlist_pos(&self) -> Option<usize> {
+        self.playlist_pos
     }
 
-    pub fn add_to_queue(&mut self, track: Track) {
-        self.queue.push(track);
+    pub fn add_to_playlist(&mut self, track: Track) {
+        self.playlist.push(track);
 
-        // If it is the only track in the queue, play it immediately
-        if self.queue.len() == 1 {
-            self.next();
+        // If it is the only track in the playlist, play it immediately
+        if self.playlist.len() == 1 {
+            self.jump_to_next_track();
         }
     }
 
-    pub fn jump(&mut self, pos: usize) {
-        if self.queue.get(pos).is_none() {
+    pub fn jump_to_track_at(&mut self, pos: usize) {
+        if self.playlist.get(pos).is_none() {
             return;
         }
-        self.queue_pos = Some(pos);
+        self.playlist_pos = Some(pos);
         self.update_sink_to_current_track();
     }
 
-    pub fn prev(&mut self) {
-        if self.queue.is_empty() {
+    pub fn jump_to_previous_track(&mut self) {
+        if self.playlist.is_empty() {
             return;
         }
 
-        let Some(queue_pos) = self.queue_pos.as_mut() else {
+        let Some(playlist_pos) = self.playlist_pos.as_mut() else {
             return;
         };
 
-        if *queue_pos > 0 {
-            *queue_pos -= 1;
+        if *playlist_pos > 0 {
+            *playlist_pos -= 1;
         }
 
         self.update_sink_to_current_track();
     }
 
-    pub fn next(&mut self) {
-        if self.queue.is_empty() {
+    pub fn jump_to_next_track(&mut self) {
+        if self.playlist.is_empty() {
             return;
         }
 
-        self.queue_pos = match self.queue_pos {
-            // Do nothing if this is the last song in queue
-            Some(pos) if pos == self.queue.len() - 1 => Some(pos),
+        self.playlist_pos = match self.playlist_pos {
+            // Do nothing if this is the last song in playlist
+            Some(pos) if pos == self.playlist.len() - 1 => Some(pos),
             Some(pos) => Some(pos + 1),
             None => Some(0),
         };
@@ -106,7 +106,7 @@ impl Player {
     }
 
     pub fn current_track(&self) -> Option<&Track> {
-        self.queue_pos.and_then(|pos| self.queue.get(pos))
+        self.playlist_pos.and_then(|pos| self.playlist.get(pos))
     }
 
     pub fn play(&mut self) {
@@ -121,7 +121,7 @@ impl Player {
         self.sink.is_paused()
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub fn is_idle(&self) -> bool {
         self.sink.empty()
     }
 
@@ -133,7 +133,7 @@ impl Player {
         Some(elapsed / total)
     }
 
-    pub fn set_pos(&mut self, pos: f32) {
+    pub fn set_position(&mut self, pos: f32) {
         let Some(total) = self
             .current_track_duration
             .map(|duration| duration.as_secs_f32())
@@ -155,7 +155,7 @@ impl Player {
     }
 
     pub fn clear(&mut self) {
-        self.queue.clear();
+        self.playlist.clear();
         self.update_sink_to_current_track();
     }
 }

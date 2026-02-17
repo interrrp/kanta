@@ -36,13 +36,13 @@ struct Kanta {
 enum KantaMessage {
     AddTrack,
     LoadPlaylist,
+    ExportPlaylist,
+    ClearPlaylist,
     Play,
     Pause,
-    Prev,
-    Next,
-    Jump(usize),
-    ClearQueue,
-    ExportQueue,
+    PreviousTrack,
+    NextTrack,
+    JumpToTrack(usize),
     PositionChanged(f32),
     VolumeChanged(f32),
     Tick,
@@ -68,11 +68,11 @@ impl Kanta {
             };
 
             let prev_button = button("Prev")
-                .on_press(KantaMessage::Prev)
+                .on_press(KantaMessage::PreviousTrack)
                 .style(button::secondary);
 
             let next_button = button("Next")
-                .on_press(KantaMessage::Next)
+                .on_press(KantaMessage::NextTrack)
                 .style(button::secondary);
 
             let position_slider = match self.player.pos() {
@@ -113,7 +113,7 @@ impl Kanta {
             None => scrollable(text("No lyrics available").color(muted)).width(Length::Fill),
         };
 
-        let queue_controls = {
+        let playlist_controls = {
             let add_track_button = button("Add").on_press(KantaMessage::AddTrack);
 
             let load_playlist_button = button("Load")
@@ -121,11 +121,11 @@ impl Kanta {
                 .style(button::secondary);
 
             let export_button = button("Export")
-                .on_press(KantaMessage::ExportQueue)
+                .on_press(KantaMessage::ExportPlaylist)
                 .style(button::secondary);
 
             let clear_button = button("Clear")
-                .on_press(KantaMessage::ClearQueue)
+                .on_press(KantaMessage::ClearPlaylist)
                 .style(button::danger);
 
             row![]
@@ -136,47 +136,43 @@ impl Kanta {
                 .spacing(8)
         };
 
-        let mut queue_songs = column![].spacing(16);
-        for (index, track) in self.player.queue().iter().enumerate() {
-            queue_songs =
-                queue_songs.push(
-                    button(
-                        column![]
-                            .push(
-                                text(track.title().unwrap_or(
-                                    track.path().file_name().unwrap().to_str().unwrap(),
-                                ))
-                                .size(Pixels(16.0)),
-                            )
-                            .push(text(track.album().unwrap_or("No album")).size(Pixels(14.0)))
-                            .push(text(track.artist().unwrap_or("No artist")).size(Pixels(12.0)))
-                            .spacing(2)
-                            .padding(Padding {
-                                left: if self.player.queue_pos() == Some(index) {
-                                    16.0
-                                } else {
-                                    2.0
-                                },
-                                top: 0.0,
-                                bottom: 0.0,
-                                right: 0.0,
-                            }),
-                    )
-                    .on_press(KantaMessage::Jump(index))
+        let mut playlist_tracks = column![].spacing(16);
+        for (index, track) in self.player.playlist().iter().enumerate() {
+            let path_str = track.path().file_name().unwrap().to_str().unwrap();
+
+            let contents = column![]
+                .push(text(track.title().unwrap_or(path_str)).size(Pixels(16.0)))
+                .push(text(track.album().unwrap_or("No album")).size(Pixels(14.0)))
+                .push(text(track.artist().unwrap_or("No artist")).size(Pixels(12.0)))
+                .spacing(2)
+                .padding(Padding {
+                    left: if self.player.playlist_pos() == Some(index) {
+                        16.0
+                    } else {
+                        2.0
+                    },
+                    top: 0.0,
+                    bottom: 0.0,
+                    right: 0.0,
+                });
+
+            playlist_tracks = playlist_tracks.push(
+                button(contents)
+                    .on_press(KantaMessage::JumpToTrack(index))
                     .style(button::text)
                     .padding(0),
-                );
+            );
         }
 
-        let queue = column![]
-            .push(queue_controls)
-            .push(scrollable(queue_songs).width(Length::Fill))
+        let playlist = column![]
+            .push(playlist_controls)
+            .push(scrollable(playlist_tracks).width(Length::Fill))
             .width(Length::Fill)
             .spacing(8);
 
         let bottom_row = row![]
             .push(lyrics)
-            .push(queue)
+            .push(playlist)
             .width(Length::Fill)
             .spacing(8);
 
@@ -190,16 +186,27 @@ impl Kanta {
 
     fn update(&mut self, message: KantaMessage) {
         use KantaMessage::*;
+
         match message {
+            Play => self.player.play(),
+            Pause => self.player.pause(),
+            PreviousTrack => self.player.jump_to_previous_track(),
+            NextTrack => self.player.jump_to_next_track(),
+            JumpToTrack(pos) => self.player.jump_to_track_at(pos),
+            ClearPlaylist => self.player.clear(),
+            PositionChanged(position) => self.player.set_position(position),
+            VolumeChanged(volume) => self.player.set_volume(volume),
+
             AddTrack => {
                 if let Some(path) = FileDialog::new()
                     .set_title("Add track")
                     .add_filter("Tracks", &["mp3", "ogg", "wav", "flac"])
                     .pick_file()
                 {
-                    self.player.add_to_queue(Track::load(path).unwrap())
+                    self.player.add_to_playlist(Track::load(path).unwrap())
                 }
             }
+
             LoadPlaylist => {
                 let Some(path) = FileDialog::new()
                     .set_title("Load playlist")
@@ -211,19 +218,15 @@ impl Kanta {
 
                 self.player.clear();
 
+                // Newline-separated list of track paths
                 fs::read_to_string(path)
                     .unwrap()
                     .lines()
                     .map(|line| Track::load(PathBuf::from(line)).unwrap())
-                    .for_each(|track| self.player.add_to_queue(track));
+                    .for_each(|track| self.player.add_to_playlist(track));
             }
-            Play => self.player.play(),
-            Pause => self.player.pause(),
-            Prev => self.player.prev(),
-            Next => self.player.next(),
-            Jump(pos) => self.player.jump(pos),
-            ClearQueue => self.player.clear(),
-            ExportQueue => {
+
+            ExportPlaylist => {
                 let Some(path) = FileDialog::new()
                     .set_title("Export playlist")
                     .add_filter("Playlists", &["m3u8"])
@@ -232,9 +235,10 @@ impl Kanta {
                     return;
                 };
 
+                // Newline-separated list of track paths
                 let m3u8_data = self
                     .player
-                    .queue()
+                    .playlist()
                     .iter()
                     .map(|track| track.path().to_str().unwrap().to_string())
                     .collect::<Vec<_>>()
@@ -242,11 +246,10 @@ impl Kanta {
 
                 fs::write(path, m3u8_data).unwrap();
             }
-            PositionChanged(pos) => self.player.set_pos(pos),
-            VolumeChanged(volume) => self.player.set_volume(volume),
+
             Tick => {
-                if self.player.is_empty() {
-                    self.player.next();
+                if self.player.is_idle() {
+                    self.player.jump_to_next_track();
                 }
             }
         }
