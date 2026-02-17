@@ -41,6 +41,7 @@ enum KantaMessage {
     Next,
     Jump(usize),
     ClearQueue,
+    ExportQueue,
     PositionChanged(f32),
     VolumeChanged(f32),
     Tick,
@@ -114,11 +115,19 @@ impl Kanta {
         let queue_controls = {
             let add_track_button = button("Add track").on_press(KantaMessage::SelectAudioPath);
 
+            let export_button = button("Export")
+                .on_press(KantaMessage::ExportQueue)
+                .style(button::secondary);
+
             let clear_button = button("Clear")
                 .on_press(KantaMessage::ClearQueue)
                 .style(button::danger);
 
-            row![].push(add_track_button).push(clear_button).spacing(8)
+            row![]
+                .push(add_track_button)
+                .push(export_button)
+                .push(clear_button)
+                .spacing(8)
         };
 
         let mut queue_songs = column![].spacing(16);
@@ -209,6 +218,25 @@ impl Kanta {
             Next => self.player.next(),
             Jump(pos) => self.player.jump(pos),
             ClearQueue => self.player.clear(),
+            ExportQueue => {
+                let Some(path) = FileDialog::new()
+                    .set_title("Export playlist")
+                    .add_filter("Playlists", &["m3u8"])
+                    .save_file()
+                else {
+                    return;
+                };
+
+                let m3u8_data = self
+                    .player
+                    .queue()
+                    .iter()
+                    .map(|track| track.path().to_str().unwrap().to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                fs::write(path, m3u8_data).unwrap();
+            }
             PositionChanged(pos) => self.player.set_pos(pos),
             VolumeChanged(volume) => self.player.set_volume(volume),
             Tick => {
