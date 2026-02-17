@@ -1,9 +1,12 @@
 use std::{
     fs::File,
+    io::BufReader,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
-use anyhow::bail;
+use anyhow::{anyhow, bail};
+use rodio::{Decoder, Source};
 use symphonia::{
     core::{
         io::MediaSourceStream,
@@ -19,6 +22,7 @@ pub struct Track {
     album: Option<String>,
     artist: Option<String>,
     lyrics: Option<String>,
+    duration: Duration,
 }
 
 impl Track {
@@ -41,6 +45,10 @@ impl Track {
     pub fn lyrics(&self) -> Option<&str> {
         self.lyrics.as_deref()
     }
+
+    pub fn duration(&self) -> Duration {
+        self.duration
+    }
 }
 
 impl Track {
@@ -56,6 +64,15 @@ impl Track {
             bail!("No metadata")
         };
 
+        // Ideally we should calculate duration with Symphonia as well to avoid re-reading
+        // the file, but it's much more accurate (and convenient) to use Rodio here
+        let file = File::open(&path)?;
+        let reader = BufReader::new(file);
+        let source = Decoder::new(reader)?;
+        let duration = source
+            .total_duration()
+            .ok_or(anyhow!("track has no total duration"))?;
+
         let find_tag = |key| {
             rev.tags()
                 .iter()
@@ -69,6 +86,7 @@ impl Track {
             album: find_tag(StandardTagKey::Album),
             artist: find_tag(StandardTagKey::Artist),
             lyrics: find_tag(StandardTagKey::Lyrics),
+            duration,
         })
     }
 }

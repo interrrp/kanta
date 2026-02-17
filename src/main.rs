@@ -1,6 +1,6 @@
 #![deny(clippy::all)]
 
-use std::{fs, path::PathBuf, time::Duration};
+use std::time::Duration;
 
 use iced::{
     Color, Element, Length, Padding, Pixels, Settings, Subscription,
@@ -43,15 +43,15 @@ enum KantaMessage {
     PreviousTrack,
     NextTrack,
     JumpToTrack(usize),
-    PositionChanged(f32),
-    VolumeChanged(f32),
+    SetPosition(f32),
+    SetVolume(f32),
     Tick,
 }
 
 impl Kanta {
     fn new() -> Kanta {
         Kanta {
-            player: Player::new(),
+            player: Player::try_new().unwrap(),
         }
     }
 
@@ -75,13 +75,18 @@ impl Kanta {
                 .on_press(KantaMessage::NextTrack)
                 .style(button::secondary);
 
-            let position_slider = match self.player.pos() {
-                Some(pos) => slider(0.0..=1.0, pos, KantaMessage::PositionChanged).step(0.001),
-                None => slider(0.0..=1.0, 0.0, KantaMessage::PositionChanged),
+            let position_slider = match self.player.current_track() {
+                Some(track) => {
+                    let elapsed = self.player.position().as_secs_f32();
+                    let total = track.duration().as_secs_f32();
+
+                    slider(0.0..=total, elapsed, KantaMessage::SetPosition)
+                }
+                None => slider(0.0..=1.0, 0.0, KantaMessage::SetPosition),
             };
 
             let volume_slider =
-                slider(0.0..=1.0, self.player.volume(), KantaMessage::VolumeChanged).step(0.01);
+                slider(0.0..=1.0, self.player.volume(), KantaMessage::SetVolume).step(0.01);
 
             row![]
                 .push(prev_button)
@@ -146,7 +151,7 @@ impl Kanta {
                 .push(text(track.artist().unwrap_or("No artist")).size(Pixels(12.0)))
                 .spacing(2)
                 .padding(Padding {
-                    left: if self.player.playlist_pos() == Some(index) {
+                    left: if self.player.playlist_index() == Some(index) {
                         16.0
                     } else {
                         2.0
@@ -192,10 +197,10 @@ impl Kanta {
             Pause => self.player.pause(),
             PreviousTrack => self.player.jump_to_previous_track(),
             NextTrack => self.player.jump_to_next_track(),
-            JumpToTrack(pos) => self.player.jump_to_track_at(pos),
-            ClearPlaylist => self.player.clear(),
-            PositionChanged(position) => self.player.set_position(position),
-            VolumeChanged(volume) => self.player.set_volume(volume),
+            JumpToTrack(index) => self.player.jump_to_track_at(index),
+            ClearPlaylist => self.player.clear_playlist(),
+            SetPosition(position) => self.player.set_position(Duration::from_secs_f32(position)),
+            SetVolume(volume) => self.player.set_volume(volume),
 
             AddTrack => {
                 if let Some(path) = FileDialog::new()
@@ -208,43 +213,23 @@ impl Kanta {
             }
 
             LoadPlaylist => {
-                let Some(path) = FileDialog::new()
+                if let Some(path) = FileDialog::new()
                     .set_title("Load playlist")
                     .add_filter("Playlists", &["m3u8"])
                     .pick_file()
-                else {
-                    return;
-                };
-
-                self.player.clear();
-
-                // Newline-separated list of track paths
-                fs::read_to_string(path)
-                    .unwrap()
-                    .lines()
-                    .map(|line| Track::load(PathBuf::from(line)).unwrap())
-                    .for_each(|track| self.player.add_to_playlist(track));
+                {
+                    self.player.load_m3u8_playlist(path.as_path()).unwrap();
+                }
             }
 
             ExportPlaylist => {
-                let Some(path) = FileDialog::new()
+                if let Some(path) = FileDialog::new()
                     .set_title("Export playlist")
                     .add_filter("Playlists", &["m3u8"])
                     .save_file()
-                else {
-                    return;
-                };
-
-                // Newline-separated list of track paths
-                let m3u8_data = self
-                    .player
-                    .playlist()
-                    .iter()
-                    .map(|track| track.path().to_str().unwrap().to_string())
-                    .collect::<Vec<_>>()
-                    .join("\n");
-
-                fs::write(path, m3u8_data).unwrap();
+                {
+                    self.player.export_m3u8_playlist(path.as_path()).unwrap();
+                }
             }
 
             Tick => {
