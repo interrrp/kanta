@@ -201,6 +201,7 @@ impl Kanta {
             ClearPlaylist => self.player.clear_playlist(),
             SetPosition(position) => self.player.set_position(Duration::from_secs_f32(position)),
             SetVolume(volume) => self.player.set_volume(volume),
+            Tick => self.player.tick().unwrap(),
 
             AddTrack => {
                 if let Some(path) = FileDialog::new()
@@ -229,12 +230,6 @@ impl Kanta {
                     .save_file()
                 {
                     self.player.export_m3u8_playlist(path.as_path()).unwrap();
-                }
-            }
-
-            Tick => {
-                if self.player.is_idle() {
-                    self.player.jump_to_next_track();
                 }
             }
         }

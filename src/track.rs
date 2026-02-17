@@ -16,6 +16,7 @@ use symphonia::{
     default::get_probe,
 };
 
+#[derive(Debug, Clone)]
 pub struct Track {
     path: PathBuf,
     title: Option<String>,

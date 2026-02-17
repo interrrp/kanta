@@ -2,10 +2,14 @@ use std::{
     fs,
     io::Cursor,
     path::{Path, PathBuf},
+    sync::mpsc::{Receiver, Sender, channel},
     time::Duration,
 };
 
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink};
+use souvlaki::{
+    MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, SeekDirection,
+};
 
 use crate::track::Track;
 
@@ -15,6 +19,9 @@ pub struct Player {
     sink: Sink,
     playlist: Vec<Track>,
     playlist_index: Option<usize>,
+    media_controls: MediaControls,
+    media_controls_tx: Sender<MediaControlEvent>,
+    media_controls_rx: Receiver<MediaControlEvent>,
 }
 
 impl Player {
@@ -22,12 +29,39 @@ impl Player {
         let stream = OutputStreamBuilder::open_default_stream()?;
         let sink = Sink::connect_new(stream.mixer());
 
-        Ok(Player {
+        #[cfg(not(target_os = "windows"))]
+        let hwnd = None;
+
+        #[cfg(target_os = "windows")]
+        let hwnd = {
+            use raw_window_handle::windows::WindowsHandle;
+
+            let handle: WindowsHandle = unimplemented!();
+            Some(handle.hwnd)
+        };
+
+        let config = souvlaki::PlatformConfig {
+            dbus_name: "my_player",
+            display_name: "My Player",
+            hwnd,
+        };
+        let media_controls = MediaControls::new(config).unwrap();
+
+        let (tx, rx) = channel();
+
+        let mut player = Player {
             stream,
             sink,
             playlist: vec![],
             playlist_index: None,
-        })
+            media_controls,
+            media_controls_tx: tx,
+            media_controls_rx: rx,
+        };
+
+        player.attach_media_control_callbacks()?;
+
+        Ok(player)
     }
 
     pub fn jump_to_track_at(&mut self, index: usize) {
@@ -65,18 +99,16 @@ impl Player {
 
     pub fn play(&mut self) {
         self.sink.play();
+        self.update_media_control_playback().unwrap();
     }
 
     pub fn pause(&mut self) {
         self.sink.pause();
+        self.update_media_control_playback().unwrap();
     }
 
     pub fn is_paused(&self) -> bool {
         self.sink.is_paused()
-    }
-
-    pub fn is_idle(&self) -> bool {
-        self.sink.empty()
     }
 
     pub fn playlist(&self) -> &[Track] {
@@ -126,6 +158,7 @@ impl Player {
     pub fn set_position(&mut self, position: Duration) {
         // Ignoring the error for now
         let _ = self.sink.try_seek(position);
+        self.update_media_control_playback().unwrap();
     }
 
     pub fn volume(&self) -> f32 {
@@ -141,12 +174,42 @@ impl Player {
             .and_then(|position| self.playlist.get(position))
     }
 
+    pub fn tick(&mut self) -> anyhow::Result<()> {
+        if self.sink.empty() {
+            self.jump_to_next_track();
+        }
+
+        while let Ok(event) = self.media_controls_rx.try_recv() {
+            use MediaControlEvent::*;
+            use SeekDirection::*;
+            match event {
+                Play => self.play(),
+                Pause => self.pause(),
+                Next => self.jump_to_next_track(),
+                Previous => self.jump_to_previous_track(),
+                SetVolume(volume) => self.set_volume(volume as f32),
+                SetPosition(MediaPosition(position)) => self.set_position(position),
+                Seek(direction) => match direction {
+                    Forward => self.set_position(self.position() + Duration::from_secs(10)),
+                    Backward => self.set_position(self.position() - Duration::from_secs(10)),
+                },
+                SeekBy(direction, amount) => match direction {
+                    Forward => self.set_position(self.position() + amount),
+                    Backward => self.set_position(self.position() - amount),
+                },
+                _ => eprintln!("unhandled media control event: {:?}", event),
+            }
+        }
+
+        Ok(())
+    }
+
     fn update_sink_to_current_track(&mut self) {
         if !self.sink.empty() {
             self.sink.skip_one();
         }
 
-        let Some(track) = self.current_track() else {
+        let Some(track) = self.current_track().cloned() else {
             return;
         };
 
@@ -160,5 +223,40 @@ impl Player {
             .unwrap();
 
         self.sink.append(source);
+
+        self.media_controls
+            .set_metadata(MediaMetadata {
+                title: track.title(),
+                artist: track.artist(),
+                album: track.album(),
+                duration: Some(track.duration()),
+                ..Default::default()
+            })
+            .unwrap();
+
+        self.update_media_control_playback().unwrap();
+    }
+
+    fn update_media_control_playback(&mut self) -> anyhow::Result<()> {
+        let progress = Some(MediaPosition(self.position()));
+
+        self.media_controls
+            .set_playback(if !self.sink.empty() && !self.sink.is_paused() {
+                MediaPlayback::Playing { progress }
+            } else if !self.sink.empty() && self.sink.is_paused() {
+                MediaPlayback::Paused { progress }
+            } else {
+                MediaPlayback::Stopped
+            })?;
+
+        Ok(())
+    }
+
+    fn attach_media_control_callbacks(&mut self) -> anyhow::Result<()> {
+        let tx = self.media_controls_tx.clone();
+        self.media_controls.attach(move |event| {
+            tx.send(event).unwrap();
+        })?;
+        Ok(())
     }
 }
