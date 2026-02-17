@@ -34,7 +34,8 @@ struct Kanta {
 
 #[derive(Debug, Clone)]
 enum KantaMessage {
-    SelectAudioPath,
+    AddTrack,
+    LoadPlaylist,
     Play,
     Pause,
     Prev,
@@ -113,7 +114,11 @@ impl Kanta {
         };
 
         let queue_controls = {
-            let add_track_button = button("Add track").on_press(KantaMessage::SelectAudioPath);
+            let add_track_button = button("Add").on_press(KantaMessage::AddTrack);
+
+            let load_playlist_button = button("Load")
+                .on_press(KantaMessage::LoadPlaylist)
+                .style(button::secondary);
 
             let export_button = button("Export")
                 .on_press(KantaMessage::ExportQueue)
@@ -125,6 +130,7 @@ impl Kanta {
 
             row![]
                 .push(add_track_button)
+                .push(load_playlist_button)
                 .push(export_button)
                 .push(clear_button)
                 .spacing(8)
@@ -185,32 +191,31 @@ impl Kanta {
     fn update(&mut self, message: KantaMessage) {
         use KantaMessage::*;
         match message {
-            SelectAudioPath => {
-                let Some(path) = FileDialog::new()
+            AddTrack => {
+                if let Some(path) = FileDialog::new()
                     .set_title("Add track")
-                    .add_filter(
-                        "Tracks and playlists",
-                        &["mp3", "ogg", "wav", "flac", "m3u8"],
-                    )
+                    .add_filter("Tracks", &["mp3", "ogg", "wav", "flac"])
+                    .pick_file()
+                {
+                    self.player.add_to_queue(Track::load(path).unwrap())
+                }
+            }
+            LoadPlaylist => {
+                let Some(path) = FileDialog::new()
+                    .set_title("Load playlist")
+                    .add_filter("Playlists", &["m3u8"])
                     .pick_file()
                 else {
                     return;
                 };
 
-                let tracks_to_add = if path.extension().map(|s| s.to_str().unwrap()) == Some("m3u8")
-                {
-                    fs::read_to_string(path)
-                        .unwrap()
-                        .lines()
-                        .map(|line| Track::try_from(PathBuf::from(line)).unwrap())
-                        .collect()
-                } else {
-                    vec![Track::try_from(path).unwrap()]
-                };
+                self.player.clear();
 
-                for track in tracks_to_add {
-                    self.player.add_to_queue(track);
-                }
+                fs::read_to_string(path)
+                    .unwrap()
+                    .lines()
+                    .map(|line| Track::load(PathBuf::from(line)).unwrap())
+                    .for_each(|track| self.player.add_to_queue(track));
             }
             Play => self.player.play(),
             Pause => self.player.pause(),
