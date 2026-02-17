@@ -7,7 +7,7 @@ use anyhow::bail;
 use symphonia::{
     core::{
         io::MediaSourceStream,
-        meta::{MetadataOptions, StandardTagKey, Tag},
+        meta::{MetadataOptions, StandardTagKey},
         probe::Hint,
     },
     default::get_probe,
@@ -55,20 +55,20 @@ impl Track {
         let Some(rev) = metadata.current() else {
             bail!("No metadata")
         };
-        let tags = rev.tags();
+
+        let find_tag = |key| {
+            rev.tags()
+                .iter()
+                .find(|t| t.std_key == Some(key))
+                .map(|t| t.value.to_string())
+        };
 
         Ok(Track {
             path,
-            title: find_tag(tags, StandardTagKey::TrackTitle),
-            album: find_tag(tags, StandardTagKey::Album),
-            artist: find_tag(tags, StandardTagKey::Artist),
-            lyrics: find_tag(tags, StandardTagKey::Lyrics),
+            title: find_tag(StandardTagKey::TrackTitle),
+            album: find_tag(StandardTagKey::Album),
+            artist: find_tag(StandardTagKey::Artist),
+            lyrics: find_tag(StandardTagKey::Lyrics),
         })
     }
-}
-
-fn find_tag(tags: &[Tag], key: StandardTagKey) -> Option<String> {
-    tags.iter()
-        .find(|t| t.std_key == Some(key))
-        .map(|t| t.value.to_string())
 }
