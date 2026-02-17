@@ -13,6 +13,7 @@ use rfd::FileDialog;
 use crate::player::Player;
 use crate::track::Track;
 
+mod media_controls;
 mod player;
 mod track;
 
@@ -193,13 +194,16 @@ impl Kanta {
         use KantaMessage::*;
 
         match message {
-            Play => self.player.play(),
-            Pause => self.player.pause(),
-            PreviousTrack => self.player.jump_to_previous_track(),
-            NextTrack => self.player.jump_to_next_track(),
-            JumpToTrack(index) => self.player.jump_to_track_at(index),
-            ClearPlaylist => self.player.clear_playlist(),
-            SetPosition(position) => self.player.set_position(Duration::from_secs_f32(position)),
+            Play => self.player.play().unwrap(),
+            Pause => self.player.pause().unwrap(),
+            PreviousTrack => self.player.jump_to_previous_track().unwrap(),
+            NextTrack => self.player.jump_to_next_track().unwrap(),
+            JumpToTrack(index) => self.player.jump_to_track_at(index).unwrap(),
+            ClearPlaylist => self.player.clear_playlist().unwrap(),
+            SetPosition(position) => self
+                .player
+                .set_position(Duration::from_secs_f32(position))
+                .unwrap(),
             SetVolume(volume) => self.player.set_volume(volume),
             Tick => self.player.tick().unwrap(),
 

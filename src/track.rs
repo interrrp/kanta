@@ -57,9 +57,8 @@ impl Track {
         let file = File::open(&path)?;
         let mss = MediaSourceStream::new(Box::new(file), Default::default());
         let hint = Hint::new();
-        let mut probed = get_probe()
-            .format(&hint, mss, &Default::default(), &MetadataOptions::default())
-            .unwrap();
+        let mut probed =
+            get_probe().format(&hint, mss, &Default::default(), &MetadataOptions::default())?;
         let metadata = probed.format.metadata();
         let Some(rev) = metadata.current() else {
             bail!("No metadata")
