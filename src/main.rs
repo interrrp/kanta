@@ -74,7 +74,7 @@ impl Kanta {
                 .style(button::secondary);
 
             let position_slider = match self.player.pos() {
-                Some(pos) => slider(0.0..=1.0, pos, KantaMessage::PositionChanged).step(0.01),
+                Some(pos) => slider(0.0..=1.0, pos, KantaMessage::PositionChanged).step(0.001),
                 None => slider(0.0..=1.0, 0.0, KantaMessage::PositionChanged),
             };
 
@@ -123,28 +123,34 @@ impl Kanta {
 
         let mut queue_songs = column![].spacing(16);
         for (index, track) in self.player.queue().iter().enumerate() {
-            queue_songs = queue_songs.push(
-                button(
-                    column![]
-                        .push(text(track.title()).size(Pixels(16.0)))
-                        .push(text(track.album().unwrap_or("No album")).size(Pixels(14.0)))
-                        .push(text(track.artist().unwrap_or("No artist")).size(Pixels(12.0)))
-                        .spacing(2)
-                        .padding(Padding {
-                            left: if self.player.queue_pos() == Some(index) {
-                                16.0
-                            } else {
-                                2.0
-                            },
-                            top: 0.0,
-                            bottom: 0.0,
-                            right: 0.0,
-                        }),
-                )
-                .on_press(KantaMessage::Jump(index))
-                .style(button::text)
-                .padding(0),
-            );
+            queue_songs =
+                queue_songs.push(
+                    button(
+                        column![]
+                            .push(
+                                text(track.title().unwrap_or(
+                                    track.path().file_name().unwrap().to_str().unwrap(),
+                                ))
+                                .size(Pixels(16.0)),
+                            )
+                            .push(text(track.album().unwrap_or("No album")).size(Pixels(14.0)))
+                            .push(text(track.artist().unwrap_or("No artist")).size(Pixels(12.0)))
+                            .spacing(2)
+                            .padding(Padding {
+                                left: if self.player.queue_pos() == Some(index) {
+                                    16.0
+                                } else {
+                                    2.0
+                                },
+                                top: 0.0,
+                                bottom: 0.0,
+                                right: 0.0,
+                            }),
+                    )
+                    .on_press(KantaMessage::Jump(index))
+                    .style(button::text)
+                    .padding(0),
+                );
         }
 
         let queue = column![]
@@ -171,7 +177,14 @@ impl Kanta {
         use KantaMessage::*;
         match message {
             SelectAudioPath => {
-                let Some(path) = FileDialog::new().pick_file() else {
+                let Some(path) = FileDialog::new()
+                    .set_title("Add track")
+                    .add_filter(
+                        "Tracks and playlists",
+                        &["mp3", "ogg", "wav", "flac", "m3u8"],
+                    )
+                    .pick_file()
+                else {
                     return;
                 };
 
@@ -180,10 +193,10 @@ impl Kanta {
                     fs::read_to_string(path)
                         .unwrap()
                         .lines()
-                        .map(|line| Track::try_from(PathBuf::from(line).as_path()).unwrap())
+                        .map(|line| Track::try_from(PathBuf::from(line)).unwrap())
                         .collect()
                 } else {
-                    vec![Track::try_from(path.as_path()).unwrap()]
+                    vec![Track::try_from(path).unwrap()]
                 };
 
                 for track in tracks_to_add {

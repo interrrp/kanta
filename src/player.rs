@@ -1,6 +1,6 @@
-use std::time::Duration;
+use std::{fs, io::Cursor, time::Duration};
 
-use rodio::{OutputStream, OutputStreamBuilder, Sink, Source};
+use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
 
 use crate::Track;
 
@@ -8,6 +8,7 @@ pub struct Player {
     #[allow(dead_code)] // stream needs to live
     stream: OutputStream,
     sink: Sink,
+    current_track_duration: Option<Duration>,
     queue: Vec<Track>,
     queue_pos: Option<usize>,
 }
@@ -20,6 +21,7 @@ impl Player {
         Player {
             stream,
             sink,
+            current_track_duration: None,
             queue: vec![],
             queue_pos: None,
         }
@@ -90,7 +92,17 @@ impl Player {
             return;
         };
 
-        self.sink.append(track.source().clone());
+        let bytes = fs::read(track.path()).unwrap();
+        let bytes_len = bytes.len() as u64;
+
+        let source = Decoder::builder()
+            .with_data(Cursor::new(bytes))
+            .with_byte_len(bytes_len)
+            .build()
+            .unwrap();
+
+        self.current_track_duration = source.total_duration();
+        self.sink.append(source);
     }
 
     pub fn current_track(&self) -> Option<&Track> {
@@ -114,23 +126,16 @@ impl Player {
     }
 
     pub fn pos(&self) -> Option<f32> {
-        let track = self.current_track()?;
         let elapsed = self.sink.get_pos().as_secs_f32();
-        let total = track
-            .source()
-            .total_duration()
+        let total = self
+            .current_track_duration
             .map(|duration| duration.as_secs_f32())?;
         Some(elapsed / total)
     }
 
     pub fn set_pos(&mut self, pos: f32) {
-        let Some(track) = self.current_track() else {
-            return;
-        };
-
-        let Some(total) = track
-            .source()
-            .total_duration()
+        let Some(total) = self
+            .current_track_duration
             .map(|duration| duration.as_secs_f32())
         else {
             return;
@@ -138,7 +143,7 @@ impl Player {
 
         let duration = Duration::from_secs_f32(total * pos);
 
-        self.sink.try_seek(duration).unwrap();
+        let _ = self.sink.try_seek(duration);
     }
 
     pub fn volume(&self) -> f32 {

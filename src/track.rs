@@ -1,7 +1,9 @@
-use std::{fs::File, io::BufReader, path::Path};
+use std::{
+    fs::File,
+    path::{Path, PathBuf},
+};
 
 use anyhow::bail;
-use rodio::{Decoder, Source, source::Buffered};
 use symphonia::{
     core::{
         io::MediaSourceStream,
@@ -11,23 +13,21 @@ use symphonia::{
     default::get_probe,
 };
 
-type TrackSource = Buffered<Decoder<BufReader<File>>>;
-
 pub struct Track {
-    source: TrackSource,
-    title: String,
+    path: PathBuf,
+    title: Option<String>,
     album: Option<String>,
     artist: Option<String>,
     lyrics: Option<String>,
 }
 
 impl Track {
-    pub fn source(&self) -> &TrackSource {
-        &self.source
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
-    pub fn title(&self) -> &str {
-        &self.title
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
     }
 
     pub fn album(&self) -> Option<&str> {
@@ -43,15 +43,11 @@ impl Track {
     }
 }
 
-impl TryFrom<&Path> for Track {
+impl TryFrom<PathBuf> for Track {
     type Error = anyhow::Error;
 
-    fn try_from(path: &Path) -> anyhow::Result<Track> {
-        let file = File::open(path)?;
-        let reader = BufReader::new(file);
-        let source = Decoder::try_from(reader)?.buffered();
-
-        let file = File::open(path)?;
+    fn try_from(path: PathBuf) -> anyhow::Result<Track> {
+        let file = File::open(&path)?;
         let mss = MediaSourceStream::new(Box::new(file), Default::default());
         let hint = Hint::new();
         let mut probed = get_probe()
@@ -69,9 +65,8 @@ impl TryFrom<&Path> for Track {
         }
 
         Ok(Track {
-            source,
-            title: find_tag(tags, StandardTagKey::TrackTitle)
-                .unwrap_or(path.file_name().unwrap().to_string_lossy().to_string()),
+            path,
+            title: find_tag(tags, StandardTagKey::TrackTitle),
             album: find_tag(tags, StandardTagKey::Album),
             artist: find_tag(tags, StandardTagKey::Artist),
             lyrics,
