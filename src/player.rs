@@ -105,6 +105,7 @@ impl Player {
             .lines()
             .map(|line| Track::load(PathBuf::from(line)))
             .collect::<Result<_, _>>()?;
+        self.update_sink_to_current_track()?;
         Ok(())
     }
 

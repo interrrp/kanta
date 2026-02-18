@@ -1,12 +1,12 @@
 #![deny(clippy::all)]
 
-use std::time::Duration;
+use std::{fmt::Debug, time::Duration};
 
 use iced::{
     Color, Element, Length, Padding, Pixels, Settings, Subscription,
     alignment::Vertical,
     application, time,
-    widget::{button, column, container, row, scrollable, slider, text},
+    widget::{button, column, row, scrollable, slider, text},
 };
 use rfd::FileDialog;
 
@@ -21,7 +21,7 @@ fn main() -> iced::Result {
     application(Kanta::new, Kanta::update, Kanta::view)
         .subscription(Kanta::subscription)
         .title("Kanta")
-        .window_size((640, 360))
+        .window_size((900, 900))
         .settings(Settings {
             default_text_size: Pixels(14.0),
             ..Default::default()
@@ -41,8 +41,8 @@ enum KantaMessage {
     ClearPlaylist,
     Play,
     Pause,
-    PreviousTrack,
-    NextTrack,
+    JumpToPreviousTrack,
+    JumpToNextTrack,
     JumpToTrack(usize),
     SetPosition(f32),
     SetVolume(f32),
@@ -57,136 +57,139 @@ impl Kanta {
     }
 
     fn view(&self) -> Element<'_, KantaMessage> {
-        let controls = {
-            let play_pause_button = if self.player.current_track().is_some() {
-                if self.player.is_paused() {
-                    button("Play").on_press(KantaMessage::Play)
-                } else {
-                    button("Pause").on_press(KantaMessage::Pause)
-                }
+        use KantaMessage::*;
+
+        macro_rules! btn {
+            ($text:expr, $message:expr) => {
+                button($text).on_press($message)
+            };
+            ($text:expr, $message:expr, $style:ident) => {
+                button($text).on_press($message).style(button::$style)
+            };
+        }
+
+        let play_pause_button = if self.player.current_track().is_some() {
+            if self.player.is_paused() {
+                btn!("Play", Play)
             } else {
-                button("Nothing playing")
-            };
-
-            let prev_button = button("Prev")
-                .on_press(KantaMessage::PreviousTrack)
-                .style(button::secondary);
-
-            let next_button = button("Next")
-                .on_press(KantaMessage::NextTrack)
-                .style(button::secondary);
-
-            let position_slider = match self.player.current_track() {
-                Some(track) => {
-                    let elapsed = self.player.position().as_secs_f32();
-                    let total = track.duration().as_secs_f32();
-
-                    slider(0.0..=total, elapsed, KantaMessage::SetPosition)
-                }
-                None => slider(0.0..=1.0, 0.0, KantaMessage::SetPosition),
-            };
-
-            let volume_slider =
-                slider(0.0..=1.0, self.player.volume(), KantaMessage::SetVolume).step(0.01);
-
-            row![]
-                .push(prev_button)
-                .push(play_pause_button)
-                .push(next_button)
-                .push(text("Position"))
-                .push(position_slider)
-                .push(text("Volume"))
-                .push(volume_slider)
-                .align_y(Vertical::Center)
-                .spacing(8)
+                btn!("Pause", Pause)
+            }
+        } else {
+            button("Stopped")
         };
 
-        let muted = Color::from_rgba(1.0, 1.0, 1.0, 0.5);
-
-        let lyrics = match self
-            .player
-            .current_track()
-            .as_ref()
-            .and_then(|track| track.lyrics())
-        {
-            Some(lyrics) => scrollable(container(text(lyrics)).padding(Padding {
-                top: 0.0,
-                right: 18.0, // Prevent scrollbar from covering lyrics (scrollbar 10px + padding 8px)
-                bottom: 0.0,
-                left: 0.0,
-            }))
-            .width(Length::Fill),
-            None => scrollable(text("No lyrics available").color(muted)).width(Length::Fill),
+        let position_slider = match self.player.current_track() {
+            Some(track) => {
+                let elapsed = self.player.position().as_secs_f32();
+                let total = track.duration().as_secs_f32();
+                slider(0.0..=total, elapsed, SetPosition)
+            }
+            None => slider(0.0..=1.0, 0.0, SetPosition),
         };
 
-        let playlist_controls = {
-            let add_track_button = button("Add").on_press(KantaMessage::AddTrack);
+        let controls = row![]
+            .push(btn!("Prev", JumpToPreviousTrack, secondary))
+            .push(play_pause_button)
+            .push(btn!("Next", JumpToNextTrack, secondary))
+            .push(text("Position"))
+            .push(position_slider)
+            .push(text("Volume"))
+            .push(slider(0.0..=1.0, self.player.volume(), SetVolume).step(0.01))
+            .spacing(8)
+            .align_y(Vertical::Center);
 
-            let load_playlist_button = button("Load")
-                .on_press(KantaMessage::LoadPlaylist)
-                .style(button::secondary);
-
-            let export_button = button("Export")
-                .on_press(KantaMessage::ExportPlaylist)
-                .style(button::secondary);
-
-            let clear_button = button("Clear")
-                .on_press(KantaMessage::ClearPlaylist)
-                .style(button::danger);
-
-            row![]
-                .push(add_track_button)
-                .push(load_playlist_button)
-                .push(export_button)
-                .push(clear_button)
-                .spacing(8)
+        let playlist_row_padding = Padding {
+            top: 8.0,
+            bottom: 8.0,
+            left: 0.0,
+            right: 0.0,
         };
 
-        let mut playlist_tracks = column![].spacing(16);
+        let playlist_controls = row![]
+            .push(btn!("Add track", AddTrack, secondary))
+            .push(btn!("Load playlist", LoadPlaylist, secondary))
+            .push(btn!("Export playlist", ExportPlaylist, secondary))
+            .push(btn!("Clear playlist", ClearPlaylist, danger))
+            .spacing(8);
+
+        let muted = Color::from_rgb(0.75, 0.75, 0.75);
+        let header_field = |name| text(name).width(Length::Fill).color(muted);
+        let playlist_header = row![]
+            .push(header_field("Artist"))
+            .push(header_field("Album"))
+            .push(header_field("Title"))
+            .push(header_field("Duration"))
+            .padding(playlist_row_padding);
+
+        let mut playlist_tracks = column![];
         for (index, track) in self.player.playlist().iter().enumerate() {
+            let color = if self.player.playlist_index() == Some(index) {
+                Color::from_rgb(0.5, 1.0, 0.5)
+            } else {
+                Color::WHITE
+            };
+
+            macro_rules! track_field {
+                ($method:ident, $default:expr) => {
+                    text(track.$method().unwrap_or($default))
+                        .width(Length::Fill)
+                        .color(color)
+                };
+                ($content:expr) => {
+                    text($content).width(Length::Fill).color(color)
+                };
+            }
+
             let path_str = track.path().file_name().unwrap().to_str().unwrap();
 
-            let contents = column![]
-                .push(text(track.title().unwrap_or(path_str)).size(Pixels(16.0)))
-                .push(text(track.album().unwrap_or("No album")).size(Pixels(14.0)))
-                .push(text(track.artist().unwrap_or("No artist")).size(Pixels(12.0)))
-                .spacing(2)
-                .padding(Padding {
-                    left: if self.player.playlist_index() == Some(index) {
-                        16.0
-                    } else {
-                        2.0
-                    },
-                    top: 0.0,
-                    bottom: 0.0,
-                    right: 0.0,
-                });
+            let total_seconds = track.duration().as_secs();
+            let hours = total_seconds / 3600;
+            let minutes = (total_seconds % 3600) / 60;
+            let seconds = total_seconds % 60;
+            let duration = if hours != 0 {
+                format!("{}:{:02}:{:02}", hours, minutes, seconds)
+            } else {
+                format!("{:02}:{:02}", minutes, seconds)
+            };
 
             playlist_tracks = playlist_tracks.push(
-                button(contents)
-                    .on_press(KantaMessage::JumpToTrack(index))
-                    .style(button::text)
-                    .padding(0),
+                btn!(
+                    row![]
+                        .push(track_field!(artist, "No artist"))
+                        .push(track_field!(album, "No album"))
+                        .push(track_field!(title, path_str))
+                        .push(track_field!(duration))
+                        .padding(playlist_row_padding),
+                    JumpToTrack(index),
+                    text
+                )
+                .padding(0),
             );
         }
+        let playlist_tracks = scrollable(playlist_tracks);
 
         let playlist = column![]
             .push(playlist_controls)
-            .push(scrollable(playlist_tracks).width(Length::Fill))
-            .width(Length::Fill)
-            .spacing(8);
+            .push(playlist_header)
+            .push(playlist_tracks)
+            .height(Length::Fill);
 
-        let bottom_row = row![]
-            .push(lyrics)
-            .push(playlist)
+        let lyrics = scrollable(
+            match self.player.current_track().and_then(|track| track.lyrics()) {
+                Some(lyrics) => text(lyrics),
+                None => text("No lyrics available").center().color(muted),
+            }
             .width(Length::Fill)
-            .spacing(8);
+            .height(Length::Fill),
+        )
+        .height(Length::Fill);
 
         column![]
             .push(controls)
-            .push(bottom_row)
-            .padding(8)
+            .push(playlist)
+            .push(lyrics)
             .spacing(8)
+            .padding(8)
             .into()
     }
 
@@ -196,8 +199,8 @@ impl Kanta {
         match message {
             Play => self.player.play().unwrap(),
             Pause => self.player.pause().unwrap(),
-            PreviousTrack => self.player.jump_to_previous_track().unwrap(),
-            NextTrack => self.player.jump_to_next_track().unwrap(),
+            JumpToPreviousTrack => self.player.jump_to_previous_track().unwrap(),
+            JumpToNextTrack => self.player.jump_to_next_track().unwrap(),
             JumpToTrack(index) => self.player.jump_to_track_at(index).unwrap(),
             ClearPlaylist => self.player.clear_playlist().unwrap(),
             SetPosition(position) => self
