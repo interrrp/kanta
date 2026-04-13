@@ -64,21 +64,19 @@ impl Track {
             bail!("No metadata")
         };
 
-        // Ideally we should calculate duration with Symphonia as well to avoid re-reading
-        // the file, but it's much more accurate (and convenient) to use Rodio here
-        let file = File::open(&path)?;
-        let reader = BufReader::new(file);
-        let source = Decoder::new(reader)?;
-        let duration = source
-            .total_duration()
-            .ok_or(anyhow!("track has no total duration"))?;
-
         let find_tag = |key| {
             rev.tags()
                 .iter()
                 .find(|t| t.std_key == Some(key))
                 .map(|t| t.value.to_string())
         };
+
+        let file = File::open(&path)?;
+        let reader = BufReader::new(file);
+        let source = Decoder::new(reader)?;
+        let duration = source
+            .total_duration()
+            .ok_or(anyhow!("track has no total duration"))?;
 
         Ok(Track {
             path,
