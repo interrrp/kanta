@@ -1,5 +1,5 @@
 use std::{
-    sync::mpsc::{Receiver, channel},
+    sync::mpsc::{channel, Receiver},
     time::Duration,
 };
 
@@ -37,7 +37,9 @@ impl KantaMediaControls {
         media_controls.attach({
             let tx = event_tx.clone();
             move |event| {
-                tx.send(event).unwrap();
+                if let Err(e) = tx.send(event) {
+                    eprintln!("Failed to send media control event: {}", e);
+                }
             }
         })?;
 
