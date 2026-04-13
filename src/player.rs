@@ -1,6 +1,6 @@
 use std::{
-    fs,
-    io::Cursor,
+    fs::{self, File},
+    io::BufReader,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -11,13 +11,14 @@ use souvlaki::{MediaControlEvent, MediaPosition, SeekDirection};
 
 use crate::{media_controls::KantaMediaControls, track::Track};
 
+#[derive(Default)]
 pub struct Player {
-    #[allow(dead_code)] // stream needs to live
-    stream: OutputStream,
-    sink: Sink,
+    #[allow(dead_code)]
+    stream: Option<OutputStream>,
+    sink: Option<Sink>,
     playlist: Vec<Track>,
     playlist_index: Option<usize>,
-    media_controls: KantaMediaControls,
+    media_controls: Option<KantaMediaControls>,
 }
 
 impl Player {
@@ -26,11 +27,11 @@ impl Player {
         let sink = Sink::connect_new(stream.mixer());
 
         Ok(Player {
-            stream,
-            sink,
+            stream: Some(stream),
+            sink: Some(sink),
             playlist: vec![],
             playlist_index: None,
-            media_controls: KantaMediaControls::try_new()?,
+            media_controls: Some(KantaMediaControls::try_new()?),
         })
     }
 
@@ -60,7 +61,6 @@ impl Player {
         }
 
         self.playlist_index = match self.playlist_index {
-            // Do nothing if this is the last song in playlist
             Some(index) if index == self.playlist.len() - 1 => Some(index),
             Some(index) => Some(index + 1),
             None => Some(0),
@@ -72,19 +72,23 @@ impl Player {
     }
 
     pub fn play(&mut self) -> anyhow::Result<()> {
-        self.sink.play();
-        self.update_media_control_playback()?;
+        if let Some(sink) = &self.sink {
+            sink.play();
+            self.update_media_control_playback()?;
+        }
         Ok(())
     }
 
     pub fn pause(&mut self) -> anyhow::Result<()> {
-        self.sink.pause();
-        self.update_media_control_playback()?;
+        if let Some(sink) = &self.sink {
+            sink.pause();
+            self.update_media_control_playback()?;
+        }
         Ok(())
     }
 
     pub fn is_paused(&self) -> bool {
-        self.sink.is_paused()
+        self.sink.as_ref().map(|s| s.is_paused()).unwrap_or(true)
     }
 
     pub fn playlist(&self) -> &[Track] {
@@ -103,6 +107,7 @@ impl Player {
         let contents = fs::read_to_string(path)?;
         self.playlist = contents
             .lines()
+            .filter(|line| !line.trim().is_empty())
             .map(|line| Track::load(PathBuf::from(line)))
             .collect::<Result<_, _>>()?;
         self.update_sink_to_current_track()?;
@@ -133,22 +138,25 @@ impl Player {
     }
 
     pub fn position(&self) -> Duration {
-        self.sink.get_pos()
+        self.sink.as_ref().map(|s| s.get_pos()).unwrap_or_default()
     }
 
     pub fn set_position(&mut self, position: Duration) -> anyhow::Result<()> {
-        // Ignoring the error for now
-        let _ = self.sink.try_seek(position);
+        if let Some(sink) = &self.sink {
+            let _ = sink.try_seek(position);
+        }
         self.update_media_control_playback()?;
         Ok(())
     }
 
     pub fn volume(&self) -> f32 {
-        self.sink.volume()
+        self.sink.as_ref().map(|s| s.volume()).unwrap_or(1.0)
     }
 
     pub fn set_volume(&self, volume: f32) {
-        self.sink.set_volume(volume);
+        if let Some(sink) = &self.sink {
+            sink.set_volume(volume);
+        }
     }
 
     pub fn current_track(&self) -> Option<&Track> {
@@ -157,11 +165,19 @@ impl Player {
     }
 
     pub fn tick(&mut self) -> anyhow::Result<()> {
-        if self.sink.empty() {
+        let is_empty = self.sink.as_ref().map(|s| s.empty()).unwrap_or(true);
+        if is_empty {
             self.jump_to_next_track()?;
         }
 
-        while let Some(event) = self.media_controls.receive_event() {
+        let events: Vec<MediaControlEvent> =
+            if let Some(media_controls) = self.media_controls.as_mut() {
+                std::iter::from_fn(|| media_controls.receive_event()).collect()
+            } else {
+                vec![]
+            };
+
+        for event in events {
             use MediaControlEvent::*;
             use SeekDirection::*;
             match event {
@@ -187,32 +203,40 @@ impl Player {
     }
 
     fn update_sink_to_current_track(&mut self) -> anyhow::Result<()> {
-        if !self.sink.empty() {
-            self.sink.skip_one();
+        if let Some(sink) = &self.sink {
+            if !sink.empty() {
+                sink.skip_one();
+            }
         }
 
         let Some(track) = self.current_track().cloned() else {
             return Ok(());
         };
 
-        let bytes = fs::read(track.path())?;
-        let bytes_len = bytes.len() as u64;
+        let file = File::open(track.path())?;
+        let reader = BufReader::new(file);
+        let source = Decoder::new(reader)?;
 
-        let source = Decoder::builder()
-            .with_data(Cursor::new(bytes))
-            .with_byte_len(bytes_len)
-            .build()?;
+        if let Some(sink) = &self.sink {
+            sink.append(source);
+        }
 
-        self.sink.append(source);
-
-        self.media_controls.update_metadata(&track)?;
+        if let Some(media_controls) = self.media_controls.as_mut() {
+            media_controls.update_metadata(&track)?;
+        }
         self.update_media_control_playback()?;
 
         Ok(())
     }
 
     fn update_media_control_playback(&mut self) -> anyhow::Result<()> {
-        self.media_controls
-            .update_playback(self.sink.empty(), self.is_paused(), self.position())
+        let is_empty = self.sink.as_ref().map(|s| s.empty()).unwrap_or(true);
+        let is_paused = self.is_paused();
+        let position = self.position();
+
+        if let Some(media_controls) = self.media_controls.as_mut() {
+            media_controls.update_playback(is_empty, is_paused, position)?;
+        }
+        Ok(())
     }
 }
