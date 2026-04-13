@@ -1,36 +1,28 @@
 #![deny(clippy::all)]
 
-use std::{fmt::Debug, time::Duration};
+use std::time::Duration;
 
 use iced::{
-    Color, Element, Length, Padding, Pixels, Settings, Subscription,
     alignment::Vertical,
-    application, time,
+    time,
     widget::{button, column, row, scrollable, slider, text},
+    Color, Element, Length, Padding, Pixels, Settings, Subscription,
 };
 use rfd::FileDialog;
-
-use crate::player::Player;
-use crate::track::Track;
 
 mod media_controls;
 mod player;
 mod track;
 
-fn main() -> iced::Result {
-    application(Kanta::new, Kanta::update, Kanta::view)
-        .subscription(Kanta::subscription)
-        .title("Kanta")
-        .window_size((900, 900))
-        .settings(Settings {
-            default_text_size: Pixels(14.0),
-            ..Default::default()
-        })
-        .run()
-}
+use player::Player;
+use track::Track;
+
+const MUTED_COLOR: Color = Color::from_rgb(0.75, 0.75, 0.75);
+const SELECTED_COLOR: Color = Color::from_rgb(0.5, 1.0, 0.5);
 
 struct Kanta {
     player: Player,
+    error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,7 +44,76 @@ enum KantaMessage {
 impl Kanta {
     fn new() -> Kanta {
         Kanta {
-            player: Player::try_new().unwrap(),
+            player: Player::try_new().unwrap_or_else(|e| {
+                eprintln!("Failed to initialize audio: {}", e);
+                Player::default()
+            }),
+            error: None,
+        }
+    }
+
+    fn update(&mut self, message: KantaMessage) {
+        use KantaMessage::*;
+
+        let result = match message {
+            Play => self.player.play(),
+            Pause => self.player.pause(),
+            JumpToPreviousTrack => self.player.jump_to_previous_track(),
+            JumpToNextTrack => self.player.jump_to_next_track(),
+            JumpToTrack(index) => self.player.jump_to_track_at(index),
+            ClearPlaylist => self.player.clear_playlist(),
+            SetPosition(position) => self.player.set_position(Duration::from_secs_f32(position)),
+            SetVolume(volume) => {
+                self.player.set_volume(volume);
+                Ok(())
+            }
+            Tick => self.player.tick(),
+
+            AddTrack => {
+                if let Some(path) = FileDialog::new()
+                    .set_title("Add track")
+                    .add_filter("Tracks", &["mp3", "ogg", "wav", "flac"])
+                    .pick_file()
+                {
+                    match Track::load(path).map_err(|e| e.to_string()) {
+                        Ok(track) => self.player.add_to_playlist(track),
+                        Err(e) => {
+                            self.error = Some(e);
+                        }
+                    }
+                }
+                return;
+            }
+
+            LoadPlaylist => {
+                if let Some(path) = FileDialog::new()
+                    .set_title("Load playlist")
+                    .add_filter("Playlists", &["m3u8"])
+                    .pick_file()
+                {
+                    if let Err(e) = self.player.load_m3u8_playlist(path.as_path()) {
+                        self.error = Some(e.to_string());
+                    }
+                }
+                return;
+            }
+
+            ExportPlaylist => {
+                if let Some(path) = FileDialog::new()
+                    .set_title("Export playlist")
+                    .add_filter("Playlists", &["m3u8"])
+                    .save_file()
+                {
+                    if let Err(e) = self.player.export_m3u8_playlist(path.as_path()) {
+                        self.error = Some(e.to_string());
+                    }
+                }
+                return;
+            }
+        };
+
+        if let Err(e) = result {
+            self.error = Some(e.to_string());
         }
     }
 
@@ -112,7 +173,7 @@ impl Kanta {
             .push(btn!("Clear playlist", ClearPlaylist, danger))
             .spacing(8);
 
-        let muted = Color::from_rgb(0.75, 0.75, 0.75);
+        let muted = MUTED_COLOR;
         let header_field = |name| text(name).width(Length::Fill).color(muted);
         let playlist_header = row![]
             .push(header_field("Artist"))
@@ -124,7 +185,7 @@ impl Kanta {
         let mut playlist_tracks = column![];
         for (index, track) in self.player.playlist().iter().enumerate() {
             let color = if self.player.playlist_index() == Some(index) {
-                Color::from_rgb(0.5, 1.0, 0.5)
+                SELECTED_COLOR
             } else {
                 Color::WHITE
             };
@@ -140,7 +201,11 @@ impl Kanta {
                 };
             }
 
-            let path_str = track.path().file_name().unwrap().to_str().unwrap();
+            let path_str = track
+                .path()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("Unknown");
 
             let total_seconds = track.duration().as_secs();
             let hours = total_seconds / 3600;
@@ -193,56 +258,18 @@ impl Kanta {
             .into()
     }
 
-    fn update(&mut self, message: KantaMessage) {
-        use KantaMessage::*;
-
-        match message {
-            Play => self.player.play().unwrap(),
-            Pause => self.player.pause().unwrap(),
-            JumpToPreviousTrack => self.player.jump_to_previous_track().unwrap(),
-            JumpToNextTrack => self.player.jump_to_next_track().unwrap(),
-            JumpToTrack(index) => self.player.jump_to_track_at(index).unwrap(),
-            ClearPlaylist => self.player.clear_playlist().unwrap(),
-            SetPosition(position) => self
-                .player
-                .set_position(Duration::from_secs_f32(position))
-                .unwrap(),
-            SetVolume(volume) => self.player.set_volume(volume),
-            Tick => self.player.tick().unwrap(),
-
-            AddTrack => {
-                if let Some(path) = FileDialog::new()
-                    .set_title("Add track")
-                    .add_filter("Tracks", &["mp3", "ogg", "wav", "flac"])
-                    .pick_file()
-                {
-                    self.player.add_to_playlist(Track::load(path).unwrap())
-                }
-            }
-
-            LoadPlaylist => {
-                if let Some(path) = FileDialog::new()
-                    .set_title("Load playlist")
-                    .add_filter("Playlists", &["m3u8"])
-                    .pick_file()
-                {
-                    self.player.load_m3u8_playlist(path.as_path()).unwrap();
-                }
-            }
-
-            ExportPlaylist => {
-                if let Some(path) = FileDialog::new()
-                    .set_title("Export playlist")
-                    .add_filter("Playlists", &["m3u8"])
-                    .save_file()
-                {
-                    self.player.export_m3u8_playlist(path.as_path()).unwrap();
-                }
-            }
-        }
-    }
-
     fn subscription(&self) -> Subscription<KantaMessage> {
-        time::every(Duration::from_millis(10)).map(|_| KantaMessage::Tick)
+        time::every(Duration::from_millis(100)).map(|_| KantaMessage::Tick)
     }
+}
+
+fn main() -> iced::Result {
+    iced::application(Kanta::new, Kanta::update, Kanta::view)
+        .subscription(Kanta::subscription)
+        .title("Kanta")
+        .settings(Settings {
+            default_text_size: Pixels(14.0),
+            ..Default::default()
+        })
+        .run()
 }
